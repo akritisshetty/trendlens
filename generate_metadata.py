@@ -42,10 +42,7 @@ META_CSV  = OUTPUT_DIR / "metadata.csv"
 print("✓ Config ready. Output dir:", OUTPUT_DIR.resolve())
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 1 — Taxonomy, helpers, and user profiles
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ── STEP 1 — Taxonomy, helpers, and user profiles ──────────────────────────────────────────────────────────────────────
 CATEGORIES = [
     "travel", "food", "portrait", "nature", "architecture",
     "street", "animals", "fashion", "sports", "abstract",
@@ -164,10 +161,7 @@ for uid in all_users:
 print(f"✓ User profiles built for {len(user_profiles):,} users.")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 2 — Generate synthetic engagement records → smpd_metadata.json
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ── STEP 2 — Generate synthetic engagement records → smpd_metadata.json ──────────────────────────────────────────────────────────────────────
 metadata_records = []
 _rng = np.random.default_rng(42)
 
@@ -273,10 +267,7 @@ with open(META_JSON, "w") as f:
 print(f"✓ Saved → {META_JSON}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 3 — Build enriched metadata CSV (validate existence + merge)
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ── STEP 3 — Build enriched metadata CSV (validate existence + merge) ──────────────────────────────────────────────────────────────────────
 base_rows = []
 for line in raw_lines:
     line  = line.strip()
@@ -326,10 +317,7 @@ df_final = df_merged.drop(columns=["abs_path", "file_exists"], errors="ignore")
 print(f"Merged shape: {df_final.shape}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STEP 4 — Add trend_active_until & trend_duration_days
-# ══════════════════════════════════════════════════════════════════════════════
-#
+# ── STEP 4 — Add trend_active_until & trend_duration_days ──────────────────────────────────────────────────────────────────────
 # Duration model
 # ──────────────
 # trend_duration = base_duration(category)
