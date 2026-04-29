@@ -25,6 +25,7 @@ aesthetics, colour palettes, subject matter) that correlate with high customer e
 trendlens/
 ├── generate_metadata.py       # Pipeline script — Steps 1–4 (run first)
 ├── generate_embeddings.py     # Pipeline script — CLIP embeddings (run second)
+├── generate_umap.py           # Pipeline script — UMAP reduction (run third)
 ├── script.py                  # One-off utility: drops truncated images & verifies alignment
 ├── requirements.txt           # Python dependencies
 ├── train_img_filepath.txt     # Flickr-style manifest: train/<user_id>/<photo_id>.jpg
@@ -36,7 +37,10 @@ trendlens/
     ├── metadata.csv               # Enriched, validated CSV (69 226 rows × 25 cols)
     ├── embeddings.npy             # CLIP vectors — float32 (69226, 512) L2-normalised
     ├── embeddings_checkpoint.npy  # Rolling checkpoint (mirrors final on completion)
-    └── metadata_checkpoint.csv   # Metadata slice aligned with the checkpoint
+    ├── metadata_checkpoint.csv    # Metadata slice aligned with the checkpoint
+    ├── umap_2d.npy                # 2-D UMAP projection — float32 (N × 2)
+    ├── umap_10d.npy               # 10-D UMAP projection — float32 (N × 10)
+    └── umap_scatter.png           # Sanity scatter plot coloured by category
 ```
 
 > **Note:** `failed_images.txt` and `nn_preview.png` are created only if there are
@@ -55,6 +59,9 @@ python generate_metadata.py
 
 # 3. Generate CLIP embeddings — ~90 min on CPU, ~10 min on GPU
 python generate_embeddings.py
+
+# 4. Reduce embeddings with UMAP — ~10–20 min on CPU
+python generate_umap.py
 ```
 
 `script.py` is a **maintenance utility** — run it manually only when correcting dataset
@@ -211,7 +218,45 @@ the script automatically resumes from where it left off.
 
 ---
 
-## 6. Utility: `script.py`
+## 6. Pipeline: `generate_umap.py`
+
+Run **after** `generate_embeddings.py` and **before** HDBSCAN clustering.
+Reduces the 512-d L2-normalised CLIP embeddings to lower-dimensional spaces for two
+distinct purposes: interactive scatter-plot visualisation and density-based clustering.
+
+### UMAP Configuration
+
+| Run | `n_components` | `n_neighbors` | `min_dist` | `metric` | `random_state` | Purpose |
+|---|---|---|---|---|---|---|
+| `umap_2d`  | 2  | 30 | 0.1 | cosine | 42 | Scatter-plot visualisation — slight spread between points improves readability |
+| `umap_10d` | 10 | 30 | 0.0 | cosine | 42 | HDBSCAN input — `min_dist=0.0` tightens local clusters, preserving density structure |
+
+**Why cosine metric?** The CLIP embeddings are L2-normalised (unit vectors), so cosine
+distance is equivalent to Euclidean distance and captures semantic orientation, not magnitude.
+
+**Why `n_neighbors=30`?** Balances local vs global structure; 30 is a common default for
+~69 K points that preserves both fine-grained neighbourhood topology and macro cluster layout.
+
+**Why `min_dist=0.0` for 10-D?** HDBSCAN needs points to be clumped into density peaks;
+a non-zero `min_dist` artificially spreads points and can break cluster cores.
+
+### Output Files
+
+| File | Shape | dtype | Description |
+|---|---|---|---|
+| `umap_2d.npy`      | N × 2  | float32 | 2-D projection for scatter-plot visualisation |
+| `umap_10d.npy`     | N × 10 | float32 | 10-D projection as HDBSCAN clustering input |
+| `umap_scatter.png` | —      | PNG     | Sanity scatter plot coloured by the 15 content categories (tab20 colormap) |
+
+### Sanity Checks (run automatically)
+
+- Shape and dtype printed for both outputs.
+- `assert emb.shape[0] == len(metadata_csv)` — row-count alignment with `metadata.csv`.
+- Min / max printed to confirm numeric range is sensible.
+
+---
+
+## 7. Utility: `script.py`
 
 One-off maintenance script. Drops a known-bad image (`28552@N91/205379.jpg` — truncated/corrupt)
 from `metadata.csv`, resets the index, and asserts that `embeddings.npy` row count still matches.
@@ -221,7 +266,7 @@ bad image post-embedding.
 
 ---
 
-## 7. Metadata Schema (`metadata.csv`)
+## 8. Metadata Schema (`metadata.csv`)
 
 **69 226 rows × 25 columns** after all pipeline steps. All columns present for every valid image.
 
@@ -271,7 +316,7 @@ The engagement signals are deliberately **correlated** to reflect real platform 
 
 ---
 
-## 8. Embeddings Schema (`embeddings.npy`)
+## 9. Embeddings Schema (`embeddings.npy`)
 
 | Property | Value |
 |---|---|
@@ -285,7 +330,7 @@ Row `i` of `embeddings.npy` corresponds to row `i` of `metadata.csv`.
 
 ---
 
-## 9. Key Design Decisions
+## 10. Key Design Decisions
 
 1. **Why CLIP?** CLIP's joint image–text embedding space means the 512-d vectors capture semantic
    visual content (not just colour histograms), enabling meaningful clustering and cross-modal search.
@@ -312,7 +357,7 @@ Row `i` of `embeddings.npy` corresponds to row `i` of `metadata.csv`.
 
 ---
 
-## 10. Dependencies (`requirements.txt`)
+## 11. Dependencies (`requirements.txt`)
 
 ```
 torch>=2.0.0
@@ -324,6 +369,7 @@ pandas>=2.0.0
 matplotlib>=3.7.0
 tqdm>=4.65.0
 nbformat>=5.7.0
+umap-learn>=0.5.0
 ```
 
 Install with:
@@ -333,7 +379,7 @@ pip install -r requirements.txt
 
 ---
 
-## 11. Reproducibility
+## 12. Reproducibility
 
 All random operations use a fixed seed of **42**:
 - `random.seed(42)` — Python stdlib (used for per-user profile sampling)
@@ -344,18 +390,18 @@ Re-running both scripts from scratch with the same image files will produce **id
 
 ---
 
-## 12. Planned / Future Steps
+## 13. Planned / Future Steps
 
-| Step | Description |
-|---|---|
-| Clustering | K-Means / HDBSCAN on CLIP embeddings to identify visual trend clusters |
-| Trend Scoring | Aggregate `engagement_rate` and `is_viral` within clusters over time to rank rising trends |
-| Temporal Analysis | Use `timestamp` + `trend_active_until` to track cluster popularity trajectory (2010–2019) |
-| Geo Trending | Filter by `geo_city` to surface location-specific visual trends |
-| Follower-Normalised Ranking | Use `follower_count` to surface high-engagement micro-influencer content |
-| Dashboard | Streamlit / Gradio UI for visual trend browsing and NN search |
-| Production Swap-In | Replace `is_synthetic=True` rows with real Flickr API engagement data |
+| Step | Status | Description |
+|---|---|---|
+| HDBSCAN Clustering | ✅ input ready (`umap_10d.npy`) | Run HDBSCAN on 10-D UMAP embedding to identify visual trend clusters |
+| Trend Scoring | pending | Aggregate `engagement_rate` and `is_viral` within clusters over time to rank rising trends |
+| Temporal Analysis | pending | Use `timestamp` + `trend_active_until` to track cluster popularity trajectory (2010–2019) |
+| Geo Trending | pending | Filter by `geo_city` to surface location-specific visual trends |
+| Follower-Normalised Ranking | pending | Use `follower_count` to surface high-engagement micro-influencer content |
+| Dashboard | pending | Streamlit / Gradio UI for visual trend browsing and NN search |
+| Production Swap-In | pending | Replace `is_synthetic=True` rows with real Flickr API engagement data |
 
 ---
 
-*Last updated: 2026-04-29 · TrendLens v1.1*
+*Last updated: 2026-04-29 · TrendLens v1.2*
