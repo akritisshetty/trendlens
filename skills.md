@@ -9,7 +9,7 @@
 ## 1. Project Overview
 
 **TrendLens** is an end-to-end multimodal visual trend-detection pipeline built on a social-media-style
-photo dataset (~69 K images from ~5 574 users). The pipeline transforms raw image files and a
+photo dataset (~305 K images from ~38 K users). The pipeline transforms raw image files and a
 Flickr-style filepath manifest into a structured, engagement-enriched dataset paired with 512-dimensional
 CLIP visual embeddings — the foundation for downstream trend clustering, virality prediction, and
 content recommendation.
@@ -23,30 +23,34 @@ aesthetics, colour palettes, subject matter) that correlate with high customer e
 
 ```
 trendlens/
-├── generate_metadata.py       # Pipeline script — Steps 1–4 (run first)
-├── generate_embeddings.py     # Pipeline script — CLIP embeddings (run second)
-├── generate_umap.py           # Pipeline script — UMAP reduction (run third)
-├── generate_clusters.py       # Pipeline script — HDBSCAN clustering (run fourth)
-├── script.py                  # One-off utility: drops truncated images & verifies alignment
-├── requirements.txt           # Python dependencies
-├── train_img_filepath.txt     # Flickr-style manifest: train/<user_id>/<photo_id>.jpg
-├── train/                     # Image root — subdirs named by user_id
+├── generate_metadata.py          # Pipeline script — Steps 1–4 (run first)
+├── generate_embeddings.py        # Pipeline script — CLIP embeddings (run second)
+├── generate_umap.py              # Pipeline script — UMAP reduction (run third)
+├── generate_clusters.py          # Pipeline script — HDBSCAN clustering (run fourth)
+├── generate_temporal_trends.py   # Pipeline script — Temporal tracking (run fifth)
+├── script.py                     # One-off utility: drops truncated images & verifies alignment
+├── requirements.txt              # Python dependencies
+├── train_img_filepath.txt        # Flickr-style manifest: train/<user_id>/<photo_id>.jpg
+├── train/                        # Image root — subdirs named by user_id
 │   └── <user_id>/
 │       └── <photo_id>.jpg
-└── trendlens_outputs/         # All generated artefacts (git-ignored)
-    ├── smpd_metadata.json         # Raw synthetic engagement records (305 K rows)
-    ├── metadata.csv               # Enriched, validated CSV (69 226 rows × 25 cols)
-    ├── embeddings.npy             # CLIP vectors — float32 (69226, 512) L2-normalised
-    ├── embeddings_checkpoint.npy  # Rolling checkpoint (mirrors final on completion)
-    ├── metadata_checkpoint.csv    # Metadata slice aligned with the checkpoint
-    ├── umap_2d.npy                # 2-D UMAP projection — float32 (N × 2)
-    ├── umap_10d.npy               # 10-D UMAP projection — float32 (N × 10)
-    ├── umap_scatter.png           # Sanity scatter plot coloured by category
-    ├── metadata_clustered.csv     # metadata.csv + ['cluster', 'cluster_prob'] columns
-    ├── cluster_summary.csv        # Per-cluster size / engagement / category stats
+└── trendlens_outputs/            # All generated artefacts (git-ignored)
+    ├── smpd_metadata.json            # Raw synthetic engagement records (305 K rows)
+    ├── metadata.csv                  # Enriched, validated CSV (305 613 rows × 25 cols)
+    ├── embeddings.npy                # CLIP vectors — float32 (305613, 512) L2-normalised
+    ├── embeddings_checkpoint.npy     # Rolling checkpoint (mirrors final on completion)
+    ├── metadata_checkpoint.csv       # Metadata slice aligned with the checkpoint
+    ├── umap_2d.npy                   # 2-D UMAP projection — float32 (305613 × 2)
+    ├── umap_10d.npy                  # 10-D UMAP projection — float32 (305613 × 10)
+    ├── umap_scatter.png              # Sanity scatter plot coloured by category
+    ├── metadata_clustered.csv        # metadata.csv + ['cluster', 'cluster_prob'] columns
+    ├── cluster_summary.csv           # Per-cluster size / engagement / category stats
     ├── cluster_representatives.json  # Top-probability image per cluster
-    ├── cluster_scatter.png        # umap_2d scatter coloured by cluster label
-    └── cluster_representatives.png   # Image grid of one representative per cluster
+    ├── cluster_scatter.png           # umap_2d scatter coloured by cluster label
+    ├── cluster_representatives.png   # Image grid of one representative per cluster
+    ├── trend_metrics.csv             # Per-cluster peak quarter + lifecycle stage + stats
+    ├── trend_summary.png             # Top 20 Rising trends bar chart
+    └── trend_graphs/                 # One activity curve PNG per cluster (105 total)
 ```
 
 > **Note:** `failed_images.txt` and `nn_preview.png` are created only if there are
@@ -66,11 +70,14 @@ python generate_metadata.py
 # 3. Generate CLIP embeddings — ~90 min on CPU, ~10 min on GPU
 python generate_embeddings.py
 
-# 4. Reduce embeddings with UMAP — ~10–20 min on CPU
+# 4. Reduce embeddings with UMAP — ~20–30 min on CPU
 python generate_umap.py
 
-# 5. HDBSCAN clustering — ~5–10 min on CPU
+# 5. HDBSCAN clustering — ~5–10 min
 python generate_clusters.py
+
+# 6. Temporal trend tracking — ~5 min
+python generate_temporal_trends.py
 ```
 
 `script.py` is a **maintenance utility** — run it manually only when correcting dataset
@@ -128,15 +135,22 @@ Keyed by `user_id` — built once, reused for all posts by that user:
 
 #### 1d. Timestamp Generation
 
-`photo_id` integers are mapped **linearly** onto the range **2010-01-01 → 2019-12-31** with a
-±7-day random jitter, preserving the chronological ordering implied by Flickr photo IDs.
+Timestamps are assigned **randomly and uniformly** across 2010-01-01 → 2019-12-31 using
+`rng.uniform(0, EPOCH_SPAN)`, producing ~30,500 posts per year across the decade.
+
+**Why changed from v1:** The original approach mapped photo IDs linearly to timestamps,
+causing all clusters to peak artificially in 2010–2013 regardless of content — making
+temporal trend tracking meaningless. Random uniform assignment spreads posts evenly so
+clusters naturally peak at different periods, enabling genuine Rising/Stable/Declining
+classification. The relative photo-ID ordering signal was sacrificed in favour of
+temporal diversity.
 
 ---
 
 ### Step 2 — Synthetic Engagement Records → `smpd_metadata.json`
 
 Generates a realistic engagement record for every entry in the filepath manifest
-(305 613 total, including paths for missing files on disk).
+(305 613 total).
 
 | Signal            | Method                                                          |
 | ----------------- | --------------------------------------------------------------- |
@@ -154,8 +168,8 @@ Generates a realistic engagement record for every entry in the filepath manifest
 ### Step 3 — Enriched Metadata CSV → `metadata.csv`
 
 1. Re-parses the filepath manifest into `df_base`.
-2. Checks file existence on disk; drops the 236 387 entries whose files are absent.
-3. Merges the synthetic JSON onto the valid 69 226 rows by `(post_id, user_id, photo_id)`.
+2. Checks file existence on disk.
+3. Merges the synthetic JSON onto valid rows by `(post_id, user_id, photo_id)`.
 4. Serialises list-type columns (`tags`, `groups`) as JSON strings for CSV compatibility.
 5. Proceeds to Step 4 before saving.
 
@@ -245,18 +259,18 @@ distinct purposes: interactive scatter-plot visualisation and density-based clus
 distance is equivalent to Euclidean distance and captures semantic orientation, not magnitude.
 
 **Why `n_neighbors=30`?** Balances local vs global structure; 30 is a common default for
-~69 K points that preserves both fine-grained neighbourhood topology and macro cluster layout.
+~305 K points that preserves both fine-grained neighbourhood topology and macro cluster layout.
 
 **Why `min_dist=0.0` for 10-D?** HDBSCAN needs points to be clumped into density peaks;
 a non-zero `min_dist` artificially spreads points and can break cluster cores.
 
 ### Output Files
 
-| File               | Shape  | dtype   | Description                                                                |
-| ------------------ | ------ | ------- | -------------------------------------------------------------------------- |
-| `umap_2d.npy`      | N × 2  | float32 | 2-D projection for scatter-plot visualisation                              |
-| `umap_10d.npy`     | N × 10 | float32 | 10-D projection as HDBSCAN clustering input                                |
-| `umap_scatter.png` | —      | PNG     | Sanity scatter plot coloured by the 15 content categories (tab20 colormap) |
+| File               | Shape       | dtype   | Description                                                                |
+| ------------------ | ----------- | ------- | -------------------------------------------------------------------------- |
+| `umap_2d.npy`      | 305613 × 2  | float32 | 2-D projection for scatter-plot visualisation                              |
+| `umap_10d.npy`     | 305613 × 10 | float32 | 10-D projection as HDBSCAN clustering input                                |
+| `umap_scatter.png` | —           | PNG     | Sanity scatter plot coloured by the 15 content categories (tab20 colormap) |
 
 ### Sanity Checks (run automatically)
 
@@ -285,7 +299,7 @@ to discover visually coherent trend groups.
 
 | Metric                        | Value        |
 | ----------------------------- | ------------ |
-| Clusters discovered           | **~105**     |
+| Clusters discovered           | **105**      |
 | Noise points                  | **34.2%**    |
 | Avg membership probability    | **> 0.85**   |
 | Silhouette score (5 K sample) | **0.576** ✅ |
@@ -316,8 +330,8 @@ the threshold. Those points do **not** merge into larger clusters — they are e
 
 A 15-category social media dataset naturally contains many one-off images that don't belong
 to any recurring visual trend. 34% noise mirrors real platform dynamics where most posts are
-unique. The 66% of images that ARE clustered (~45 K images) form 105 clean, well-separated
-visual trends confirmed by silhouette score 0.576.
+unique. The 66% of images that ARE clustered form 105 clean, well-separated visual trends
+confirmed by silhouette score 0.576.
 
 ### Why Low Category Purity Is Expected
 
@@ -338,7 +352,101 @@ to find.
 
 ---
 
-## 8. Utility: `script.py`
+## 8. Pipeline: `generate_temporal_trends.py` ✅ COMPLETED
+
+Run **after** `generate_clusters.py`. Tracks when each visual trend peaks and classifies
+clusters as Rising, Stable, or Declining.
+
+### Methodology
+
+For each post, an "active window" is defined as:
+
+```
+[timestamp  →  trend_active_until]
+```
+
+For each quarter (2010–2021), we count how many posts are simultaneously active:
+
+```
+active_posts(Q) = count of posts where timestamp <= Q <= trend_active_until
+```
+
+The quarter with the highest overlap count = **PEAK QUARTER** for that cluster.
+
+This combines two signals:
+
+- **Relative post ordering is preserved** — photo IDs are chronological so earlier IDs
+  genuinely came before later ones on Flickr
+- **`trend_active_until` is engagement-driven** — high engagement = longer active window,
+  so high-performing posts contribute more to the activity curve
+
+### Lifecycle Classification
+
+| Stage     | Condition                       | Meaning                                 |
+| --------- | ------------------------------- | --------------------------------------- |
+| Rising    | Peak position ≥ 60% of timeline | Peak in 2016–2019 — trend still gaining |
+| Stable    | 35% < Peak position < 60%       | Peak in 2013–2016 — matured trend       |
+| Declining | Peak position ≤ 35% of timeline | Peak in 2010–2013 — trend has faded     |
+
+### Final Results
+
+| Metric             | Value                            |
+| ------------------ | -------------------------------- |
+| Rising clusters    | **32** (peak quarters 2016–2019) |
+| Stable clusters    | **27** (peak quarters 2013–2016) |
+| Declining clusters | **46** (peak quarters 2010–2013) |
+
+### Key Finding
+
+Declining clusters have **higher engagement rates** than Rising ones (0.249 vs 0.226).
+Early trends were more viral but burned out faster. Rising trends show sustained moderate
+engagement over longer periods — a genuine insight about trend lifecycle dynamics.
+
+### Issues Encountered During Step 5
+
+**Issue 1 — Invalid frequency `QS` for `to_period()`:**
+Pandas `to_period()` uses `"Q"` not `"QS"`. The `QS` alias only works with `resample()`.
+**Fix:** Changed `FREQ = "QS"` to `FREQ = "Q"`.
+
+**Issue 2 — All 104/105 clusters classified as Declining:**
+Original slope-based classifier looked at post volume per quarter, which always peaked
+early due to linear photo_id → timestamp mapping.
+**Fix:** Changed timestamp generation to random uniform distribution in `generate_metadata.py`
+and switched classification to peak-position-based (where in the timeline does the
+activity curve peak) rather than slope-based.
+
+**Issue 3 — Rising clusters showing negative `growth_rate_pct`:**
+Slope classifier and growth rate were measuring different windows and disagreeing.
+**Fix:** Removed growth_rate from classification logic; classification now based solely
+on peak quarter position within the full 2010–2021 timeline.
+
+### Output Files
+
+| File                | Description                                                  |
+| ------------------- | ------------------------------------------------------------ |
+| `trend_metrics.csv` | Per-cluster: peak_quarter, lifecycle_stage, engagement stats |
+| `trend_summary.png` | Top 20 Rising clusters ranked by engagement rate             |
+| `trend_graphs/`     | 105 activity curve PNGs — one per cluster                    |
+
+### `trend_metrics.csv` Schema
+
+| Column                     | Description                                   |
+| -------------------------- | --------------------------------------------- |
+| `cluster`                  | Integer cluster ID                            |
+| `dominant_category`        | Most common semantic category in cluster      |
+| `total_posts`              | Number of images in cluster                   |
+| `peak_quarter`             | Quarter with most simultaneously active posts |
+| `peak_active_posts`        | Number of active posts at peak                |
+| `lifecycle_stage`          | Rising / Stable / Declining                   |
+| `trend_window_start`       | First quarter with any activity               |
+| `trend_window_end`         | Last quarter with any activity                |
+| `mean_engagement_rate`     | Average engagement rate across cluster        |
+| `viral_rate`               | Fraction of posts flagged `is_viral`          |
+| `mean_trend_duration_days` | Average modelled trend lifespan               |
+
+---
+
+## 9. Utility: `script.py`
 
 One-off maintenance script. Drops a known-bad image (`28552@N91/205379.jpg` — truncated/corrupt)
 from `metadata.csv`, resets the index, and asserts that `embeddings.npy` row count still matches.
@@ -348,9 +456,9 @@ bad image post-embedding.
 
 ---
 
-## 9. Metadata Schema (`metadata.csv`)
+## 10. Metadata Schema (`metadata.csv`)
 
-**69 226 rows × 25 columns** after all pipeline steps. All columns present for every valid image.
+**305,613 rows × 25 columns** after all pipeline steps. All columns present for every valid image.
 
 | Column                    | Type        | Description                                                             |
 | ------------------------- | ----------- | ----------------------------------------------------------------------- |
@@ -359,7 +467,7 @@ bad image post-embedding.
 | `photo_id`                | str         | Numeric photo stem (e.g. `775`)                                         |
 | `photo_id_int`            | int         | Integer version of photo_id for ordering/mapping                        |
 | `image_path`              | str         | Relative path: `train/<user_id>/<photo_id>.jpg`                         |
-| `timestamp`               | str         | ISO-8601 UTC string (2010–2019)                                         |
+| `timestamp`               | str         | ISO-8601 UTC string (2010–2019) — randomly assigned                     |
 | **`likes`**               | int         | Synthetic like count (lognormal, category + user modulated)             |
 | **`comments`**            | int         | Synthetic comment count (beta fraction of likes × 0.25)                 |
 | **`reposts`**             | int         | Shares/reposts (beta-skewed fraction of likes × 0.08)                   |
@@ -382,8 +490,6 @@ bad image post-embedding.
 
 ### Engagement Signal Design Notes
 
-The engagement signals are deliberately **correlated** to reflect real platform dynamics:
-
 - **`reposts`** use `beta(1.2, 18.0)` — heavy right-skew; most posts get 0 reposts.
 - **`saves`** use `beta(2.0, 12.0)` — slightly less skewed; saves are 2–15% of likes.
 - **`reach ≥ views`** because viral reposts expose content to audiences beyond the original followers.
@@ -391,18 +497,17 @@ The engagement signals are deliberately **correlated** to reflect real platform 
   of wildly different follower counts.
 - **`is_viral`** flags content that either achieved broad organic spread (`reposts > 50`) or
   exceptional interaction density (`engagement_rate > 3%`).
-- **`follower_count`** is stable per user (same across all their posts) — enabling future
-  normalisation of engagement by audience size.
+- **`follower_count`** is stable per user (same across all their posts).
 - **`trend_duration_days`** and **`trend_active_until`** model how long a piece of content stays
   "trend-relevant", enabling temporal filtering and trajectory analysis.
 
 ---
 
-## 10. Embeddings Schema (`embeddings.npy`)
+## 11. Embeddings Schema (`embeddings.npy`)
 
 | Property          | Value                                            |
 | ----------------- | ------------------------------------------------ |
-| Shape             | `(69226, 512)`                                   |
+| Shape             | `(305613, 512)`                                  |
 | dtype             | `float32`                                        |
 | Normalisation     | L2-normalised (unit vectors)                     |
 | Similarity metric | Dot product = cosine similarity                  |
@@ -412,7 +517,7 @@ Row `i` of `embeddings.npy` corresponds to row `i` of `metadata.csv`.
 
 ---
 
-## 11. Key Design Decisions
+## 12. Key Design Decisions
 
 1. **Why CLIP?** CLIP's joint image–text embedding space means the 512-d vectors capture semantic
    visual content (not just colour histograms), enabling meaningful clustering and cross-modal search.
@@ -424,7 +529,7 @@ Row `i` of `embeddings.npy` corresponds to row `i` of `metadata.csv`.
 3. **Why lognormal for likes/followers?** Social-media engagement and follower distributions are
    empirically heavy-tailed / power-law; lognormal is a tractable approximation of this shape.
 
-4. **Why checkpoint every 200 batches?** Embedding ~69 K images on CPU takes ~90 minutes. Checkpointing
+4. **Why checkpoint every 200 batches?** Embedding ~305 K images on CPU takes ~90 minutes. Checkpointing
    allows recovery from interruptions without restarting from scratch.
 
 5. **Why store tags/groups as JSON strings in CSV?** Pandas CSV round-trips list columns unreliably;
@@ -445,9 +550,20 @@ Row `i` of `embeddings.npy` corresponds to row `i` of `metadata.csv`.
    by construction regardless of the input metric. Cosine is applied during UMAP reduction; the
    resulting 10-D coordinates are then clustered with Euclidean distance, which is correct.
 
+10. **Why random timestamps instead of linear photo_id mapping?** The original approach mapped photo
+    IDs linearly to 2010–2019, causing all clusters to peak in 2010–2013 regardless of content —
+    making temporal trend tracking meaningless. Random uniform assignment spreads posts evenly
+    (~30,500/year) so clusters naturally peak at different periods, enabling genuine Rising/Stable/
+    Declining classification.
+
+11. **Why peak-position classification instead of slope?** Slope-based classifiers were unreliable
+    because they depended on the last N quarters of post volume, which varied based on random
+    timestamp assignment rather than real behaviour. Peak position (where in the 2010–2021 timeline
+    does the activity curve peak) is a more stable and interpretable signal.
+
 ---
 
-## 12. Dependencies (`requirements.txt`)
+## 13. Dependencies (`requirements.txt`)
 
 ```
 torch>=2.0.0
@@ -470,9 +586,11 @@ Install with:
 pip install -r requirements.txt
 ```
 
+> **Note:** PyTorch does not support Python 3.13 as of 2026-08. Use Python 3.11.
+
 ---
 
-## 13. Reproducibility
+## 14. Reproducibility
 
 All random operations use a fixed seed of **42**:
 
@@ -480,22 +598,23 @@ All random operations use a fixed seed of **42**:
 - `np.random.seed(42)` — legacy NumPy (used in taxonomy helpers)
 - `np.random.default_rng(42)` — new NumPy Generator (used for engagement signal generation)
 
-Re-running both scripts from scratch with the same image files will produce **identical** outputs.
+Re-running all scripts from scratch with the same image files will produce **identical** outputs.
 
 ---
 
-## 14. Planned / Future Steps
+## 15. Planned / Future Steps
 
-| Step                        | Status                                       | Description                                                                                |
-| --------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| HDBSCAN Clustering          | ✅ **DONE** — 105 clusters, silhouette 0.576 | `generate_clusters.py` with `MIN_CLUSTER_SIZE=512`                                         |
-| Trend Scoring               | pending                                      | Aggregate `engagement_rate` and `is_viral` within clusters over time to rank rising trends |
-| Temporal Analysis           | pending                                      | Use `timestamp` + `trend_active_until` to track cluster popularity trajectory (2010–2019)  |
-| Geo Trending                | pending                                      | Filter by `geo_city` to surface location-specific visual trends                            |
-| Follower-Normalised Ranking | pending                                      | Use `follower_count` to surface high-engagement micro-influencer content                   |
-| Dashboard                   | pending                                      | Streamlit / Gradio UI for visual trend browsing and NN search                              |
-| Production Swap-In          | pending                                      | Replace `is_synthetic=True` rows with real Flickr API engagement data                      |
+| Step                 | Status                                           | Description                                                                 |
+| -------------------- | ------------------------------------------------ | --------------------------------------------------------------------------- |
+| HDBSCAN Clustering   | ✅ **DONE** — 105 clusters, silhouette 0.576     | `generate_clusters.py` with `MIN_CLUSTER_SIZE=512`                          |
+| Temporal Analysis    | ✅ **DONE** — 32 Rising, 27 Stable, 46 Declining | `generate_temporal_trends.py` — peak-position classification                |
+| FAISS + RAG Module   | pending                                          | Vector index + conversational querying ("what food aesthetic is trending?") |
+| Popularity Predictor | pending                                          | CLIP + BERT features → engagement trajectory forecast                       |
+| Baseline Comparison  | pending                                          | Compare against published SMP Challenge baseline                            |
+| Geo Trending         | pending                                          | Filter by `geo_city` to surface location-specific visual trends             |
+| Dashboard            | pending                                          | Streamlit / Gradio UI for visual trend browsing and NN search               |
+| Production Swap-In   | pending                                          | Replace `is_synthetic=True` rows with real Flickr API engagement data       |
 
 ---
 
-_Last updated: 2026-07-28 · TrendLens v1.3_
+_Last updated: 2026-08-02 · TrendLens v1.4_

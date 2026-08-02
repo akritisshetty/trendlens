@@ -14,6 +14,12 @@ Outputs (all in trendlens_outputs/)
 ────────────────────────────────────
   smpd_metadata.json   — full synthetic engagement records (305 K rows)
   metadata.csv         — valid-images-only enriched DataFrame (69 K rows)
+
+CHANGE FROM v1:
+  Timestamps are now randomly distributed across 2010-2019 per user,
+  instead of linearly mapped from photo_id. This ensures clusters have
+  posts spread across the full decade, enabling meaningful temporal
+  trend tracking and peak detection.
 """
 
 import os, json, random, warnings, math
@@ -42,7 +48,7 @@ META_CSV  = OUTPUT_DIR / "metadata.csv"
 print("✓ Config ready. Output dir:", OUTPUT_DIR.resolve())
 
 
-# ── STEP 1 — Taxonomy, helpers, and user profiles ──────────────────────────────────────────────────────────────────────
+# ── STEP 1 — Taxonomy, helpers, and user profiles ─────────────────────────────
 CATEGORIES = [
     "travel", "food", "portrait", "nature", "architecture",
     "street", "animals", "fashion", "sports", "abstract",
@@ -98,21 +104,32 @@ FLICKR_GROUPS = [
     "Documentary Photography",
 ]
 
-# Timestamp mapping: photo_id → date within 2010-2019
+# Timestamp config
 EPOCH_START = datetime(2010, 1, 1)
 EPOCH_END   = datetime(2019, 12, 31)
 EPOCH_SPAN  = (EPOCH_END - EPOCH_START).total_seconds()
 
 
-def photo_id_to_timestamp(photo_id_int, pid_min, pid_max, rng_state):
-    """Map photo_id linearly onto 2010–2019 with small ±7-day jitter."""
-    span     = max(pid_max - pid_min, 1)
-    frac     = (photo_id_int - pid_min) / span
-    base_s   = frac * EPOCH_SPAN
-    jitter_s = rng_state.uniform(-7 * 86400, 7 * 86400)
-    ts       = EPOCH_START + timedelta(seconds=base_s + jitter_s)
-    ts       = max(EPOCH_START, min(EPOCH_END, ts))
+# ── CHANGED FUNCTION ──────────────────────────────────────────────────────────
+def generate_timestamp(rng_state):
+    """
+    Randomly assign a timestamp anywhere in 2010-2019.
+
+    WHY CHANGED:
+        The old approach mapped photo_id linearly to timestamps, causing
+        all posts to cluster in early years (because low photo IDs dominate).
+        This made every cluster peak in 2010-2013, making temporal trend
+        tracking meaningless.
+
+        Random assignment spreads posts evenly across the decade so
+        different clusters naturally peak at different times, enabling
+        genuine Rising / Stable / Declining classification.
+    """
+    random_seconds = rng_state.uniform(0, EPOCH_SPAN)
+    ts = EPOCH_START + timedelta(seconds=float(random_seconds))
+    ts = max(EPOCH_START, min(EPOCH_END, ts))
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+# ── END CHANGED FUNCTION ──────────────────────────────────────────────────────
 
 
 print("✓ Taxonomy and helpers defined.")
@@ -146,7 +163,7 @@ print(f"Parsed {len(df_raw):,} entries | photo_id range: [{pid_min}, {pid_max}]"
 user_total_posts = df_raw.groupby("user_id")["photo_id"].count().to_dict()
 
 # Build per-user profiles
-rng      = np.random.default_rng(42)
+rng       = np.random.default_rng(42)
 all_users = list(df_raw["user_id"].unique())
 
 user_profiles = {}
@@ -161,7 +178,7 @@ for uid in all_users:
 print(f"✓ User profiles built for {len(user_profiles):,} users.")
 
 
-# ── STEP 2 — Generate synthetic engagement records → smpd_metadata.json ──────────────────────────────────────────────────────────────────────
+# ── STEP 2 — Generate synthetic engagement records → smpd_metadata.json ───────
 metadata_records = []
 _rng = np.random.default_rng(42)
 
@@ -174,7 +191,10 @@ for _, row in df_raw.iterrows():
 
     post_id = f"{uid}_{pid}"
 
-    ts       = photo_id_to_timestamp(pid_i, pid_min, pid_max, _rng)
+    # ── CHANGED: use random timestamp instead of photo_id linear mapping ──
+    ts = generate_timestamp(_rng)
+    # ── END CHANGE ──
+
     category = prof["preferred_cat"] if _rng.random() < 0.70 \
                else CATEGORIES[int(_rng.integers(len(CATEGORIES)))]
 
@@ -227,7 +247,7 @@ for _, row in df_raw.iterrows():
 
     # Geo (~70 % geotagged)
     if _rng.random() < 0.70:
-        city_info         = prof["home_city"] if _rng.random() < 0.60 else random.choice(GEO_POOL)
+        city_info             = prof["home_city"] if _rng.random() < 0.60 else random.choice(GEO_POOL)
         city_name, blat, blon = city_info
         geo_lat  = float(blat + _rng.uniform(-0.15, 0.15))
         geo_lon  = float(blon + _rng.uniform(-0.15, 0.15))
@@ -236,28 +256,28 @@ for _, row in df_raw.iterrows():
         geo_lat = geo_lon = geo_city = None
 
     metadata_records.append({
-        "photo_id":        pid,
-        "user_id":         uid,
-        "post_id":         post_id,
-        "image_path":      ipath,
-        "timestamp":       ts,
-        "likes":           likes,
-        "comments":        comments,
-        "reposts":         reposts,
-        "saves":           saves,
-        "views":           views,
-        "reach":           reach,
-        "follower_count":  follower_count,
-        "engagement_rate": engagement_rate,
-        "is_viral":        is_viral,
-        "category":        category,
-        "tags":            tags,
-        "groups":          groups,
-        "geo_lat":         geo_lat,
-        "geo_lon":         geo_lon,
-        "geo_city":        geo_city,
+        "photo_id":         pid,
+        "user_id":          uid,
+        "post_id":          post_id,
+        "image_path":       ipath,
+        "timestamp":        ts,
+        "likes":            likes,
+        "comments":         comments,
+        "reposts":          reposts,
+        "saves":            saves,
+        "views":            views,
+        "reach":            reach,
+        "follower_count":   follower_count,
+        "engagement_rate":  engagement_rate,
+        "is_viral":         is_viral,
+        "category":         category,
+        "tags":             tags,
+        "groups":           groups,
+        "geo_lat":          geo_lat,
+        "geo_lon":          geo_lon,
+        "geo_city":         geo_city,
         "user_total_posts": user_total_posts.get(uid, 0),
-        "is_synthetic":    True,
+        "is_synthetic":     True,
     })
 
 print(f"✓ Generated {len(metadata_records):,} synthetic records.")
@@ -267,7 +287,7 @@ with open(META_JSON, "w") as f:
 print(f"✓ Saved → {META_JSON}")
 
 
-# ── STEP 3 — Build enriched metadata CSV (validate existence + merge) ──────────────────────────────────────────────────────────────────────
+# ── STEP 3 — Build enriched metadata CSV (validate existence + merge) ──────────
 base_rows = []
 for line in raw_lines:
     line  = line.strip()
@@ -317,14 +337,7 @@ df_final = df_merged.drop(columns=["abs_path", "file_exists"], errors="ignore")
 print(f"Merged shape: {df_final.shape}")
 
 
-# ── STEP 4 — Add trend_active_until & trend_duration_days ──────────────────────────────────────────────────────────────────────
-# Duration model
-# ──────────────
-# trend_duration = base_duration(category)
-#                × engagement_multiplier          # (likes + comments) / views
-#                × virality_boost                 # ×2–4 for top-5 % by likes
-# Sampled from a lognormal (σ=0.4) centred on the computed mean, capped 1–180 d.
-
+# ── STEP 4 — Add trend_active_until & trend_duration_days ─────────────────────
 CAT_BASE_DAYS = {
     "events":        3,
     "sports":        5,
@@ -348,10 +361,8 @@ MAX_DURATION_DAYS = 180
 
 trend_rng = np.random.default_rng(42)
 
-# Engagement proxy: (likes + comments) / views
 df_final["_eng_proxy"] = (df_final["likes"] + df_final["comments"]) / df_final["views"].clip(lower=1)
 
-# Viral flag: top 5 % of likes within category
 like_95th = df_final.groupby("category")["likes"].transform(lambda x: x.quantile(0.95))
 df_final["_is_viral_dur"] = df_final["likes"] >= like_95th
 
@@ -394,6 +405,13 @@ summary = (
     .median().round(1).sort_values()
 )
 print(summary.to_string())
+print()
+print("  Timestamp distribution (sanity check):")
+ts_parsed = pd.to_datetime(df_final["timestamp"])
+print(f"  Earliest : {ts_parsed.min()}")
+print(f"  Latest   : {ts_parsed.max()}")
+print(f"  Per year :")
+print(ts_parsed.dt.year.value_counts().sort_index().to_string())
 print()
 print("  Sample rows:")
 print(
