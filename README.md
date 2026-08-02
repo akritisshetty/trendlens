@@ -9,6 +9,7 @@ python generate_metadata.py        # Generate metadata for each post
 python generate_embeddings.py      # Generate CLIP embeddings for images + metadata
 python generate_umap.py            # Perform dimensionality reduction (UMAP)
 python convert_npy_to_csv.py       # Convert .npy files to .csv for readability
+python generate_clusters.py       # Perform HDBSCAN and generate clusters
 ```
 
 ## Output
@@ -26,5 +27,10 @@ trendlens_outputs/
 ├── umap_10d.npy
 ├── umap_2d.csv
 ├── umap_10d.csv
-└── umap_scatter.png
+├── umap_scatter.png
+├── metadata_clustered.csv
+├── cluster_summary.csv
+├── cluster_representatives.json
+├── cluster_scatter.png
+└── cluster_representatives.png
 ```

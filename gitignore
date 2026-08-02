@@ -1,0 +1,5 @@
+train/
+*.npy
+*.csv
+*.json
+*.zip
