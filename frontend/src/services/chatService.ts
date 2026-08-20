@@ -193,7 +193,7 @@ export const chatService = {
         'cd frontend && npx tsx server.ts                                 # React frontend :3000',
         '```',
         '',
-        'TrendLens answers questions about **social media visual trends** only — photography styles, engagement patterns, and content strategy. It does not answer general-purpose questions.',
+        'TrendLens tracks emerging visual trends from real social media data — early signals before they go mainstream.',
       ].join('\n'),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };

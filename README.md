@@ -34,15 +34,21 @@ Real posts: images, captions, timestamps, likes, comments, views
     │
     ▼  CLIP ViT-B/32 image embeddings (512-d, L2-normalised)
     │
-    ▼  UMAP dimensionality reduction (10-D)
-    │
-    ▼  HDBSCAN clustering → visual trend groups
+    ▼  ┌─────────────────────────────────────────────────┐
+       │  Cluster Tracker (centroid locking + KNN)        │
+       │                                                  │
+       │  If baseline: UMAP → HDBSCAN → lock centroids   │
+       │  If incremental: FAISS KNN → assign to clusters  │
+       │  Emerging candidates → HDBSCAN micro-clusters     │
+       └─────────────────────────────────────────────────┘
     │
     ▼  BLIP captioning of representative images → cluster labels
     │
     ▼  Temporal analysis: daily counts, growth rate, emerging score
     │
     ▼  FAISS RAG index (sentence-transformer embeddings)
+    │
+    ▼  LLM writing layer (Gemini/OpenAI/Ollama) → natural language answer
     │
     ▼  Query → semantic retrieval → evidence-grounded answer
 ```
@@ -104,11 +110,16 @@ cp .env.example .env
 
 ```bash
 source venv/bin/activate
-python -m src.data_collector              # fetch last 10 days + full pipeline
+python -m src.data_collector              # incremental (default) — smart KNN assignment
 python -m src.data_collector --days 7     # override: last 7 days only
+python -m src.data_collector --baseline   # force full re-cluster from scratch
 ```
 
-This fetches posts from all accounts in `account.txt`, downloads images, runs CLIP embeddings, HDBSCAN clustering, BLIP captioning, temporal analysis, and builds the RAG index.
+**How it works:**
+- **First run** (baseline): Full HDBSCAN clustering → locks cluster centroids → saves registry with stable IDs
+- **Subsequent runs** (incremental): Fetches new posts → CLIP embeds → FAISS KNN assigns to existing clusters → detects emerging micro-clusters from unassigned images
+
+Cluster IDs are stable UUIDs (`cls_*`) that persist across runs, enabling genuine time-series tracking of visual trends.
 
 ### 2. Ask questions
 
@@ -185,6 +196,7 @@ To add fashion/beauty accounts, edit `account.txt` with one Instagram URL or use
 | Image embeddings | **CLIP** `openai/clip-vit-base-patch32` (512-d, L2-normalised) |
 | Dimensionality reduction | **UMAP** (10-D for clustering) |
 | Clustering | **HDBSCAN** (visual trend group discovery) |
+| Cluster tracking | **FAISS centroid KNN** + stable UUID-based registry |
 | Visual captioning | **BLIP** `blip-image-captioning-base` |
 | Temporal analysis | Daily post counts, growth rate, emerging score |
 | Vector index | **FAISS** `IndexFlatIP` over sentence-transformer embeddings |
@@ -193,11 +205,30 @@ To add fashion/beauty accounts, edit `account.txt` with one Instagram URL or use
 
 ---
 
+## Cluster Tracker (Vector Drift Prevention)
+
+Traditional re-clustering from scratch breaks time-series history — cluster IDs shuffle every run. The Cluster Tracker solves this:
+
+1. **Baseline run**: HDBSCAN clusters images → centroids are locked and saved to `artifacts/cluster_registry.json`
+2. **Incremental runs**: New images are embedded with CLIP → FAISS KNN search against locked centroids → assigned to existing clusters (similarity ≥ 0.25)
+3. **Emerging detection**: Images too far from all centroids accumulate as candidates → HDBSCAN micro-clusters when pool ≥ 3
+
+**Artifacts:**
+- `artifacts/cluster_registry.json` — stable cluster IDs, centroids, metadata
+- `artifacts/centroid_index.faiss` — FAISS index over locked centroids
+
+**CLI:**
+```bash
+python -m src.data_collector              # incremental (default)
+python -m src.data_collector --baseline   # force full re-cluster
+```
+
+---
+
 ## Data Integrity
 
 - **Instagram data is real.** Timestamps, likes, comments, views, and images come from public Instagram accounts via Apify. Not synthetic.
 - **Cluster names are VLM interpretations.** BLIP captions describe visual content, not ground truth meaning.
-- **No fabricated metrics.** Missing data is 0 or empty, never invented.
 - **Answers are evidence-grounded.** Every recommendation is backed by real post data, real engagement, and real growth metrics.
 
 ---
@@ -209,12 +240,13 @@ To add fashion/beauty accounts, edit `account.txt` with one Instagram URL or use
 | Apify fetch | ~30s (depends on API) |
 | Image download | ~2min (10 accounts, 50 posts each) |
 | CLIP embeddings (500 images) | ~1min |
-| UMAP + HDBSCAN | ~30s |
+| UMAP + HDBSCAN (baseline) | ~30s |
 | BLIP captioning | ~2min |
 | FAISS index build | ~10s |
+| **Incremental run (KNN assign)** | **~15s** (skip HDBSCAN + UMAP) |
 
 > All pipeline stages are CPU-compatible and cacheable/resumable.
 
 ---
 
-_TrendLens · Instagram visual trend detection · Last updated: 2026-08-18_
+_TrendLens · Instagram visual trend detection · Last updated: 2026-08-19_

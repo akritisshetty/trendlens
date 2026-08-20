@@ -1,38 +1,22 @@
 """
 rag.py
 ------
-RAG-style retrieval + context assembly (Stage 13), grounded ONLY in real
-pipeline artifacts:
+RAG-style retrieval + context assembly, grounded ONLY in real pipeline
+artifacts.
 
-  cluster interpretations (Phase 5)
-  FAISS index over CLIP text embeddings (Phase 6)
-  trend metrics (Phase 4)
-  representative images (Phase 3)
+Instagram data takes priority when available. The query path checks for
+Instagram RAG index first, then falls back to the legacy pipeline.
 
-No LLM is required. Answers are formatted from the retrieved cluster
-metadata, and every number shown is a measured pipeline output. Anything
-that does not exist (geo hotspots, viral rate, LLM prose) is omitted or
-explicitly marked NOT MEASURED — never invented.
-
-SCOPE RESTRICTION
------------------
-TrendLens ONLY answers questions about social-media visual trends /
-photography styles. Any other question (programming, math, cooking, news,
-trivia, translation, advice ...) is rejected up front with a clear scope
-message instead of a forced, nonsensical cluster match.
-
-Scope detection combines:
-  1. decisive out-of-scope phrase patterns (fast, deterministic)
-  2. a CLIP text anchor gate: similarity to a curated set of visual-trend
-     anchor questions vs. an out-of-scope anchor set. Calibrated so that
-     in-scope queries score higher on the domain anchors (margin rule).
+SCOPE
+-----
+TrendLens tracks emerging visual trends from real social media data.
+Questions outside this scope are rejected with a clear message.
 
 INTEGRITY
 ---------
-* timestamps/engagement are the neutral synthetic demo labels
-  (``config.SYNTHETIC_DATA_WARNING``)
+* Instagram data: real timestamps/engagement from public accounts
+* Legacy data: synthetic demo labels (``config.SYNTHETIC_DATA_WARNING``)
 * cluster names/descriptions are VLM interpretations, not ground truth
-* clusters come from the real CLIP clustering of the 5K sampled images
 """
 
 from __future__ import annotations
@@ -98,6 +82,132 @@ def _load_retrieval():
             "cluster_ids": cluster_ids,
         }
     return _CACHE["retrieval"]
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Instagram data loading
+# ──────────────────────────────────────────────────────────────────────────
+_INSTAGRAM_TRENDS_CACHE: Optional[dict[str, Any]] = None
+_INSTAGRAM_CHUNKS_CACHE: list[dict[str, Any]] = []
+_INSTAGRAM_RAG_MODEL = None
+_INSTAGRAM_RAG_INDEX = None
+
+
+def load_instagram_trends() -> Optional[dict[str, Any]]:
+    """Load Instagram trends JSON (from data_collector.py)."""
+    global _INSTAGRAM_TRENDS_CACHE
+    if _INSTAGRAM_TRENDS_CACHE is not None:
+        return _INSTAGRAM_TRENDS_CACHE
+    path = config.INSTAGRAM_TRENDS_PATH
+    if not path.exists():
+        return None
+    try:
+        _INSTAGRAM_TRENDS_CACHE = json.loads(path.read_text())
+        return _INSTAGRAM_TRENDS_CACHE
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _load_instagram_rag_index() -> None:
+    """Load or build the Instagram RAG index (sentence-transformer + FAISS)."""
+    global _INSTAGRAM_RAG_MODEL, _INSTAGRAM_RAG_INDEX, _INSTAGRAM_CHUNKS_CACHE
+    if _INSTAGRAM_RAG_MODEL is not None:
+        return
+
+    import faiss
+    from sentence_transformers import SentenceTransformer
+
+    chunks_path = config.INSTAGRAM_RAG_CHUNKS_PATH
+    index_path = config.INSTAGRAM_RAG_INDEX_PATH
+    if not chunks_path.exists() or not index_path.exists():
+        return
+
+    _INSTAGRAM_CHUNKS_CACHE = json.loads(chunks_path.read_text())
+    if not _INSTAGRAM_CHUNKS_CACHE:
+        return
+
+    _INSTAGRAM_RAG_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    _INSTAGRAM_RAG_INDEX = faiss.read_index(str(index_path))
+
+
+def retrieve_instagram_chunks(query: str, k: int = 5, min_score: float = 0.25) -> list[dict[str, Any]]:
+    """Retrieve relevant Instagram cluster chunks via semantic search.
+
+    Returns only chunks whose cosine similarity to the query exceeds
+    *min_score*.  When no chunk clears the threshold the list is empty,
+    which signals to the caller that Instagram data has no relevant
+    match for this query.
+    """
+    _load_instagram_rag_index()
+    if _INSTAGRAM_RAG_INDEX is None or not _INSTAGRAM_CHUNKS_CACHE:
+        return []
+
+    q_emb = _INSTAGRAM_RAG_MODEL.encode([query], normalize_embeddings=True)
+    scores, indices = _INSTAGRAM_RAG_INDEX.search(
+        q_emb.astype("float32"), min(k, len(_INSTAGRAM_CHUNKS_CACHE))
+    )
+    results: list[dict[str, Any]] = []
+    for score, idx in zip(scores[0], indices[0]):
+        if idx < 0:
+            continue
+        if float(score) < min_score:
+            continue
+        chunk = dict(_INSTAGRAM_CHUNKS_CACHE[idx])
+        chunk["relevance_score"] = round(float(score), 4)
+        results.append(chunk)
+    return results
+
+
+def format_instagram_trends_answer(query: str, trends: dict[str, Any]) -> str:
+    """Concise, actionable answer from Instagram trend data.
+
+    For each trend: what it is, and how to recreate it visually.
+    No engagement metrics, no example captions — just the trend and how-to.
+    """
+    themes = trends.get("themes") or []
+    if not themes:
+        return "No trend data available yet. Run the pipeline first."
+
+    themes = sorted(themes, key=lambda t: t.get("emerging_score", 0), reverse=True)
+
+    # Filter by subject if user mentioned one
+    subject_match = re.search(
+        r"\b(?:about|in|for|of|related to|involving)\s+(.{2,40})", query, re.IGNORECASE
+    )
+    subject = subject_match.group(1).strip() if subject_match else None
+    if subject:
+        subj_tokens = set(re.findall(r"[a-z]{3,}", subject.lower()))
+        def _matches(t: dict) -> bool:
+            kw = {str(x).lower() for x in t.get("keywords", [])}
+            name_tokens = set(re.findall(r"[a-z]{3,}", t.get("name", "").lower()))
+            return bool(subj_tokens & (kw | name_tokens))
+        relevant = [t for t in themes if _matches(t)]
+        if relevant:
+            themes = relevant
+
+    lines: list[str] = []
+
+    for t in themes[:4]:
+        kw = t.get("keywords", [])
+        name = t.get("name", "this visual style")
+        caption = t.get("blip_caption", "")
+
+        # Build a natural sentence
+        kw_str = ", ".join(kw[:4]) if kw else name
+
+        # Opening: what is trending
+        sentence = f"Currently, **{name}** is trending ({kw_str})"
+
+        # Add visual guidance from the caption
+        if caption:
+            # Clean up the caption — strip leading articles, lowercase start
+            cap = caption.strip().rstrip(".")
+            cap = re.sub(r"^(A |An |The )", "", cap, flags=re.IGNORECASE)
+            sentence += f". To capture this look, think {cap}"
+        sentence += "."
+        lines.append(sentence)
+
+    return "\n\n".join(lines)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -713,11 +823,6 @@ def format_advice_answer(query: str, context: dict[str, Any]) -> str:
         f"- This is what the **5,000-image sample** actually contains for \"{subject}\". If no visual pattern covers "
         "the subject, the closest matches are the best evidence available."
     )
-    lines.append("")
-    lines.append(
-        f"*Data source: TrendLens pipeline — CLIP clustering + BLIP interpretation of 5,000 sampled images, "
-        f"neutral synthetic timestamps/engagement (demo). No fabricated metrics.*"
-    )
     return "\n".join(lines)
 
 
@@ -751,39 +856,24 @@ def format_answer(query: str, context: dict[str, Any]) -> str:
             )
         lines.append("")
 
-    lines.append(
-        "*Data source: TrendLens pipeline — CLIP clustering of 5,000 sampled "
-        "images, BLIP interpretations (not ground truth), neutral synthetic "
-        "timestamps/engagement (demo). No fabricated metrics.*"
-    )
     return "\n".join(lines)
 
 
 def _refusal_answer(query: str, scope: dict[str, Any]) -> str:
     reason = scope.get("reason") or (
-        "The query is not about a social-media visual trend."
+        "The query is not about a visual trend."
     )
     return "\n".join([
-        "## ❌ Out of scope",
+        "I track emerging visual trends from real social media data — photography styles, engagement patterns, and early signals.",
         "",
-        f"TrendLens **only answers questions about social-media visual trends "
-        f"and photography styles**. It cannot answer: “*{query}*”.",
+        f"Your question doesn't fit that scope: *{query}*",
         "",
         f"**Reason:** {reason}",
         "",
-        "It works by searching CLIP clusters of 5,000 sampled images — it has "
-        "**no general knowledge** and **no LLM**. It will never invent an "
-        "answer it is not designed to give.",
-        "",
-        "**Examples of what it CAN answer:**",
-        "- *What kind of cat photos get the most engagement?*",
-        "- *Coffee photography style*",
-        "- *Fashion lookbook photography*",
-        "- *Sneaker product shots*",
-        "- *What are the best photo styles for Instagram?*",
-        "",
-        "Please rephrase your question around **visual styles, photography "
-        "aesthetics, or content trends**.",
+        "**Try asking about:**",
+        "- What photography aesthetics are rising?",
+        "- Which visual styles get the most engagement?",
+        "- What content patterns are emerging in [niche]?",
     ])
 
 
@@ -980,6 +1070,76 @@ def _wants_images(query: str) -> bool:
 def run_query(query: str, k: int = 5) -> dict[str, Any]:
     scope = classify_scope(query)
 
+    # ── Instagram data path (primary) ──
+    ig_trends = load_instagram_trends()
+    ig_chunks = retrieve_instagram_chunks(query, k=k) if ig_trends else []
+
+    if ig_trends and (_live_trend_intent(query) or ig_chunks):
+        # Instagram data is available — use it as the primary source
+        answer = format_instagram_trends_answer(query, ig_trends)
+        ig_themes = ig_trends.get("themes", [])
+        ig_retrieved = [
+            {
+                "name": c.get("name", ""),
+                "keywords": c.get("keywords", []),
+                "growth_rate": c.get("growth_rate"),
+                "emerging_score": c.get("emerging_score", 0),
+                "relevance_score": c.get("relevance_score", 0),
+                "avg_likes": c.get("avg_likes", 0),
+                "avg_comments": c.get("avg_comments", 0),
+                "avg_views": c.get("avg_views", 0),
+                "content_types": c.get("content_types", {}),
+                "top_hashtags": c.get("top_hashtags", []),
+            }
+            for c in ig_chunks
+        ]
+
+        # Try LLM polish for natural language output
+        answer_mode = "rule-based"
+        try:
+            from src import llm
+
+            # Build a context bundle for the LLM from Instagram data
+            ig_context = {
+                "query": query,
+                "total_clusters_analyzed": len(ig_themes),
+                "dataset": "instagram",
+                "disclaimer": ig_trends.get("disclaimer", config.INSTAGRAM_DATA_WARNING),
+                "retrieved_clusters": [
+                    {
+                        "rank": i + 1,
+                        "name": c.get("name", ""),
+                        "description": c.get("blip_caption", ""),
+                        "blip_caption": c.get("blip_caption", ""),
+                        "characteristics": c.get("keywords", []),
+                        "interpretation_confidence": None,
+                    }
+                    for i, c in enumerate(ig_chunks)
+                ],
+            }
+            polished = llm.format_answer_with_llm(query, ig_context)
+            if polished:
+                answer, answer_mode = polished, f"llm-{llm.llm_config().get('provider')}"
+        except Exception:  # noqa: BLE001 — fall back to rule-based, never break
+            pass
+
+        return {
+            "query": query,
+            "answer": answer,
+            "answerMode": answer_mode,
+            "inScope": True,
+            "scopeReason": None,
+            "scopeMethod": "instagram-data",
+            "retrievedClusters": ig_retrieved,
+            "supportingImages": [],
+            "totalClustersAnalyzed": len(ig_themes),
+            "disclaimer": ig_trends.get("disclaimer", config.INSTAGRAM_DATA_WARNING),
+            "sources": ["instagram"],
+            "mode": "instagram-rag",
+            "timestamp": pd.Timestamp.now("UTC").isoformat(),
+        }
+
+    # ── Legacy pipeline path (fallback) ──
     if not scope["in_scope"]:
         return {
             "query": query,
@@ -1019,10 +1179,6 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
     answer, answer_mode = rule_answer, "rule-based"
     live_override = False
     if "live_trends" in context and context["live_trends"]:
-        # A "what's trending right now" question is answered from the REAL
-        # live themes — this overrides the sample-cluster answer. These
-        # answers stay rule-based on purpose: the value of TrendLens is its
-        # own detected themes, so the LLM never replaces real trend data.
         answer = format_live_trends_answer(query, context)
         live_override = True
     if not live_override:

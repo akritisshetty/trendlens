@@ -45,14 +45,20 @@ STRICT RULES — violations are unacceptable:
 2. The engagement/likes/timestamps in the evidence are SYNTHETIC DEMO data unless the evidence explicitly says otherwise. Present them as demo estimates, never as real platform numbers.
 3. If the retrieved context contains no real match for the subject, say so honestly and describe the closest matches from what WAS retrieved.
 4. Answer the user's question directly. Do not say you are an AI/LLM. Do not refuse.
-5. Keep a short footer citing the data source and stating no fabricated metrics were invented.
-6. Keep the response reasonably concise (roughly 150–350 words of body text, plus bullets).
+5. Keep the response reasonably concise (roughly 150–350 words of body text, plus bullets).
 
 CRITICAL — NEVER mention these in your answer:
 - Cluster IDs (e.g. "Cluster 20", "cluster 17", "Cluster #5")
 - Engagement scores, post counts, or trend scores (e.g. "79.04", "325 posts", "trend score 0.11")
 - Lifecycle labels (e.g. "Rising", "Stable", "Declining")
+- Trend category labels (e.g. "Trending up", "Fading", "Steady presence", "Just appeared")
 - Any numeric metrics from the pipeline internals
+
+When discussing what is trending, use natural conversational language like:
+- "Currently, [X] is trending in cafe visuals."
+- "Right now, [X] is seeing a lot of activity on social media."
+- "[X] is a popular visual theme at the moment."
+Never label trends with stiff categories. Write as if recommending to a friend.
 
 Instead, describe the visual patterns and actionable advice in plain language. Reference the visual content (keywords, characteristics, captions) not the pipeline internals."""
 
@@ -66,7 +72,7 @@ def llm_config() -> dict[str, Any]:
     if not provider:
         return {}
     defaults = {
-        "gemini": "gemini-3.5-flash",
+        "gemini": "gemini-3.1-flash-lite",
         "openai": "gpt-4o-mini",
         "ollama": "llama3.2",
     }
@@ -227,15 +233,20 @@ def format_answer_with_llm(query: str, context: dict[str, Any]) -> Optional[str]
         return None
 
     # RAG Step 1: Retrieve relevant text chunks from the knowledge base
-    from src.rag import retrieve_text_chunks
-
-    retrieved_chunks = retrieve_text_chunks(query, k=5)
+    # (optional — may fail if legacy pipeline artifacts are missing, e.g.
+    #  when only Instagram data is available)
     retrieved_text = ""
-    if retrieved_chunks:
-        retrieved_text = "\n\n".join(
-            f"[Source: cluster {c['cluster_id']}] {c['text']}"
-            for c in retrieved_chunks
-        )
+    try:
+        from src.rag import retrieve_text_chunks
+
+        retrieved_chunks = retrieve_text_chunks(query, k=5)
+        if retrieved_chunks:
+            retrieved_text = "\n\n".join(
+                f"[Source: cluster {c['cluster_id']}] {c['text']}"
+                for c in retrieved_chunks
+            )
+    except Exception:  # noqa: BLE001
+        pass
 
     # RAG Step 2: Build prompt with retrieved context
     evidence = _trim_evidence(context)

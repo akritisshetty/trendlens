@@ -217,6 +217,35 @@ def handle_predict(payload: dict) -> dict[str, Any]:
     }
 
 
+def handle_instagram_trends() -> dict[str, Any]:
+    """Real Instagram-sourced emerging trends."""
+    from src.rag import load_instagram_trends
+
+    trends = load_instagram_trends()
+    if trends is None:
+        return {
+            "disclaimer": config.INSTAGRAM_DATA_WARNING,
+            "error": "No Instagram trends yet — run `python -m src.data_collector` first.",
+            "themes": [],
+        }
+    return trends
+
+
+def handle_instagram_image(name: str) -> tuple[bytes | None, str | int]:
+    """Serve a downloaded Instagram post image."""
+    import mimetypes
+
+    name = (name or "").strip()
+    if not name or name != Path(name).name:
+        return None, 404
+    path = (config.INSTAGRAM_IMAGES_DIR / name).resolve()
+    img_dir = config.INSTAGRAM_IMAGES_DIR.resolve()
+    if not str(path).startswith(str(img_dir)) or not path.is_file():
+        return None, 404
+    ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    return path.read_bytes(), ctype
+
+
 def handle_live_trends() -> dict[str, Any]:
     """Real Reddit-sourced emerging trends (labelled REAL, unlike SMPD demo)."""
     from src.live import load_trends
@@ -296,9 +325,25 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send(200, body, ctype)
 
+    def _serve_instagram_image(self, path: str):
+        from urllib.parse import parse_qs, urlparse
+
+        query = parse_qs(urlparse(path).query)
+        name = (query.get("name") or [""])[0]
+        body, ctype = handle_instagram_image(name)
+        if body is None:
+            self._send(404, json.dumps({"error": "Instagram image not found"}).encode("utf-8"))
+            return
+        self._send(200, body, ctype)
+
     def do_GET(self):
         try:
-            if self.path.startswith("/api/images"):
+            if self.path.startswith("/api/instagram-images"):
+                self._serve_instagram_image(self.path)
+            elif self.path.startswith("/api/instagram-trends"):
+                body, code = _json(handle_instagram_trends())
+                self._send(code, body)
+            elif self.path.startswith("/api/images"):
                 self._serve_image(self.path)
             elif self.path.startswith("/api/live-images"):
                 self._serve_live_image(self.path)

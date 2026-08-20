@@ -4,266 +4,165 @@
 
 ---
 
-## Prerequisites
+## Quick Start (one command)
 
-### Python (one-time setup)
 ```bash
-# Create and activate virtual environment
+# Run everything: pipeline → backend → frontend → open browser
+./run.sh          # default: 10-day window
+./run.sh 7        # override to 7-day window
+```
+
+This single script:
+1. Runs the full data pipeline (fetch → embed → cluster → caption → trends → RAG)
+2. Starts the Python backend on `:8000`
+3. Starts the React frontend on `:3000`
+4. Opens your browser to `http://localhost:3000`
+
+Press `Ctrl+C` to stop both servers.
+
+---
+
+## Prerequisites (one-time setup)
+
+```bash
+# Python venv
 python3 -m venv venv
 source venv/bin/activate
-
-# Install all Python dependencies
 pip install -r requirements.txt
-```
 
-### Node.js (one-time setup — for the frontend)
-```bash
-# Install Node.js (if not already installed)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
+# Frontend deps
+cd frontend && npm install && cd ..
 
-# Install frontend dependencies (from the frontend/ directory)
-cd frontend
-npm install
-cd ..
-```
-
-### Environment
-```bash
-# No API keys are required for the core pipeline — TrendLens runs fully local:
-# retrieval, clustering, retrieval QA — no external API is called anywhere in
-# the query path.
-
-# OPTIONAL: LLM writing layer (rewrites retrieved evidence into prose).
-# Leave unset to stay rule-based (honest, deterministic).
-export TRENDLENS_LLM_PROVIDER=gemini      # gemini | openai | ollama
-export TRENDLENS_LLM_API_KEY=...          # required for gemini/openai; not for ollama
-export TRENDLENS_LLM_MODEL=gemini-3.5-flash   # optional; provider defaults
-export TRENDLENS_LLM_BASE_URL=...         # optional; required for ollama
-
-# OPTIONAL: real-time (live) trend ingestion.
-# All of these can live in a .env file in the project root (auto-loaded by
-# config.py, never overrides real env vars). See .env.example.
-# TRENDLENS_LIVE_SOURCE: auto (default) | reddit | wikimedia.
-#   auto tries Reddit first; on 403 (datacenter IP) it falls back to the
-#   key-free Wikimedia Commons feed (real upload timestamps, no engagement).
-# Reddit (for REAL upvote/comment engagement; residential IPs can be
-# 403-blocked on the public feed — use OAuth):
-export REDDIT_CLIENT_ID=...
-export REDDIT_CLIENT_SECRET=...
-export TRENDLENS_SUBREDDITS=foodporn,coffee   # watched subreddits
-# Wikimedia Commons fallback (key-free, default values shown):
-export TRENDLENS_LIVE_SOURCE=auto
-export TRENDLENS_WIKIMEDIA_QUERIES=latte art,coffee,street food,breakfast
-export TRENDLENS_WIKIMEDIA_LIMIT=10
-export TRENDLENS_WIKIMEDIA_DAYS=90
-export TRENDLENS_WIKIMEDIA_RECENT_DAYS=30
+# Environment
+cp .env.example .env
+# Edit .env and set APIFY_API_TOKEN (required for Instagram scraping)
+# Get one free at: https://apify.com/account#/integrations
 ```
 
 ---
 
-## Python Pipeline (run in order, venv must be active)
+## Individual Commands
 
-> Each phase is `python -m src.<module>` and writes to `artifacts/` / `data/`.
-> Tests gate every phase: `python -m pytest tests/`
-> All expensive stages are cached to disk and resume-safe.
+### Data Pipeline
 
 ```bash
 source venv/bin/activate
 
-# Phase 1 — Neutral synthetic engagement metadata (timestamps, likes, comments)
-python -m src.synthetic_data
+# Incremental run (default) — KNN assign new images to existing clusters
+python -m src.data_collector
 
-# Phase 2 — CLIP image embeddings (512-d, L2-normalised), checkpointed/resumable
-python -m src.embeddings
+# Override scan window
+python -m src.data_collector --days 7
 
-# Phase 3 — UMAP (10-D) + HDBSCAN clustering + representative images
-python -m src.clustering
-
-# Phase 4 — Temporal aggregation + Rising/Stable/Declining lifecycle labels
-python -m src.trends
-
-# Phase 5 — BLIP captions of representatives -> cluster interpretations
-python -m src.interpretation
-
-# Phase 6 — CLIP-text FAISS index over interpretations + retrieval evaluation
-python -m src.retrieval
-
-# Phase 7 (OPTIONAL, real data) — Live trend ingestion:
-#   1) fetch real posts (Reddit, else Wikimedia Commons fallback) -> data/live/live_posts.parquet
-#   2) download their images   -> data/live/images/   (throttled hosts: downloads persist across re-runs)
-#   3) CLIP-embed              -> data/live/live_embeddings.npy
-#   4) HDBSCAN themes + growth -> artifacts/cluster_metadata/live_trends.json
-python -m src.live
-# Source: r/{foodporn,coffee} via Reddit, else key-free Wikimedia Commons.
-# Cap per-run embedding pool with TRENDLENS_LIVE_MAX_EMBED (default 40).
-# Idempotent: re-running only adds genuinely new posts.
+# Force full re-cluster from scratch (baseline)
+python -m src.data_collector --baseline
 ```
 
----
+Pipeline stages (incremental):
+1. Fetch posts from `account.txt` via Apify
+2. Download only new images
+3. CLIP image embeddings (new images only)
+4. FAISS KNN assignment to existing clusters
+5. Detect emerging micro-clusters from unassigned images
+6. Temporal trend analysis (stable cluster IDs)
+7. FAISS RAG index rebuild
 
-## RAG Query System
+Pipeline stages (baseline — `--baseline`):
+1. Fetch posts from `account.txt` via Apify
+2. Download images
+3. CLIP image embeddings
+4. UMAP dim reduction + HDBSCAN clustering
+5. Lock centroids → build cluster registry with stable UUIDs
+6. BLIP captioning of representative images
+7. Temporal trend analysis
+8. FAISS RAG index build
+
+### Backend API (port 8000)
 
 ```bash
-source venv/bin/activate
-
-# Ask a question from the Python CLI (prints the honest markdown answer)
-python -m src.rag "a cup of coffee"
-
-# Scope gate: out-of-scope queries are refused (no retrieval)
-python -m src.rag "write a c program to print hello world"
-
-# Live-trend intent: answered from REAL Reddit themes if you ran python -m src.live
-python -m src.rag "what is trending in food right now"
+python -m src.api
 ```
 
-> Answers focus on actionable visual advice only. Cluster IDs, engagement
-> scores, lifecycle labels, and pipeline internals are intentionally hidden.
+**Endpoints:**
+- `GET  /api/health` — service status
+- `POST /api/rag-query` — `{"query": "..."}` → answer with evidence
+- `GET  /api/trends` — top emerging trends
+- `GET  /api/clusters` — all cluster interpretations
+- `GET  /api/live-trends` — real Instagram emerging themes
+- `GET  /api/live-images?name=` — serve downloaded Instagram images
 
----
-
-## Backend API (Python stdlib, port 8000)
-
+**Smoke test:**
 ```bash
-source venv/bin/activate
-TRENDLENS_API_PORT=8000 python -m src.api
-# Port is read from TRENDLENS_API_PORT (default 8000).
-# Endpoints:
-#   GET  /api/health            service status + integrity labels
-#   POST /api/rag-query         {"query": "..."} -> {answer, inScope, scopeReason, scopeMethod, supportingImages, retrievedClusters}
-#   GET  /api/trends            top trends, enriched with name/description/blip_caption/image
-#   GET  /api/clusters          all cluster interpretations + metrics + representative image URL
-#   GET  /api/images?path=...   whitelisted representative JPEG (404 for anything else)
-#   GET  /api/live-trends       real Reddit emerging themes (404-free, honest empty payload until src.live runs)
-#   GET  /api/live-images?name= real live post image from data/live/images (basename-only, 404 for traversal)
-#   POST /api/predict-popularity honest demo: observed stats, NOT EVALUATED
-
-# Quick smoke test
 curl -s http://127.0.0.1:8000/api/health
 curl -s -X POST http://127.0.0.1:8000/api/rag-query \
-  -H 'Content-Type: application/json' -d '{"query": "red flowers"}'
-# Out-of-scope query → inScope:false, no clusters retrieved
-curl -s -X POST http://127.0.0.1:8000/api/rag-query \
-  -H 'Content-Type: application/json' -d '{"query": "write a c program"}'
+  -H 'Content-Type: application/json' \
+  -d '{"query": "What cafe aesthetic is rising this week?"}'
 ```
 
----
-
-## Frontend (React + Express)
-
-The frontend is in `frontend/`. The Express server (`server.ts`) **proxies
-all `/api/*` routes to the Python backend** (`127.0.0.1:8000`) and serves the
-React SPA. It never fabricates data — if the backend is down it returns an
-explicit "backend offline" message.
+### Frontend (port 3000)
 
 ```bash
-cd frontend
-npm install            # one-time
-
-# Start the Express server (serves React SPA + /api/* proxy)
-npx tsx server.ts
-# → http://localhost:3000
+cd frontend && npx tsx server.ts
 ```
 
-> **How the RAG endpoint works:** your query → Express proxy → Python
-> `/api/rag-query` → `src/rag.py` runs the two-stage scope gate (keyword
-> patterns then ~150 in-scope visual anchors) → if in scope: semantic text
-> retrieval → LLM answer grounded in retrieved context (optional).
-> Answers focus on actionable visual advice — no cluster IDs or metrics.
-> A "what's trending right now" query is answered from `src.live` REAL themes
-> when `live_trends.json` exists (clearly labelled REAL vs synthetic demo).
-> Live-trend answers are always rule-based — the LLM is never applied to them,
-> so the site's own detected themes are always what the user sees.
-> Source is Reddit when reachable, else the key-free Wikimedia Commons feed;
-> Commons honestly reports "no upvote/comment signal" in the answer.
+Requires the backend to be running on `:8000`. All `/api/*` requests are proxied.
 
----
-
-## Run Everything
+### RAG Query (CLI)
 
 ```bash
-# Backend (:8000) + frontend (:3000), with cleanup on exit
-./scripts/run_all.sh
-
-# Backend only
-./scripts/run_backend.sh
+python -m src.rag "What cafe aesthetic is rising this week?"
+python -m src.rag "What food photography styles are trending on Instagram?"
 ```
 
----
-
-## Tests
+### Tests
 
 ```bash
-source venv/bin/activate
-python -m pytest tests/ -q      # 154 tests covering every phase + API + LLM + live
+python -m pytest tests/ -q
 ```
 
 ---
 
-## Deployment (Free)
+## Adding / Changing Accounts
 
-TrendLens can be deployed for free on [Render](https://render.com):
+Edit `account.txt` — one Instagram URL or username per line:
 
-1. Push your code to GitHub
-2. Go to Render → New → Blueprint
-3. Select your repository
-4. Render auto-detects `render.yaml` and creates both services
-
-**Auto-deploy:** Every push to `development` or `main` branch triggers a rebuild.
-
-```bash
-# Push to GitHub
-git add .
-git commit -m "Your changes"
-git push
-
-# Render auto-deploys
+```
+https://www.instagram.com/username
+@username
+username
 ```
 
-**Environment variables on Render:**
-- `TRENDLENS_LLM_API_KEY` — your Gemini API key (if using LLM)
-- `TRENDLENS_LIVE_SOURCE` — `auto` or `wikimedia`
-
-> Render free tier spins down after 15 min inactivity (cold start ~30s).
+All three formats work. Then re-run `python -m src.data_collector`.
 
 ---
 
-## Output Artifacts Reference
+## Switching Niches
 
-| File | Phase | Description |
-|------|-------|-------------|
-| `data/metadata/metadata.parquet` | 1 | Neutral synthetic engagement metadata (demo, clearly labelled) |
-| `data/processed/sample_metadata.parquet` | 1 | 5K manifest aligned to image paths |
-| `data/embeddings/embeddings.npy` | 2 | CLIP (5000, 512) L2-normalised |
-| `artifacts/cluster_models/*` | 3 | HDBSCAN labels / probabilities / fitted model |
-| `artifacts/cluster_metadata/cluster_summary.csv` | 3 | Per-cluster composition |
-| `artifacts/cluster_metadata/trend_metrics.csv` | 4 | Lifecycle stage per cluster |
-| `artifacts/cluster_metadata/cluster_captions.json` | 5 | **Primary RAG document store** (BLIP interpretations) |
-| `data/embeddings/cluster_index.faiss` | 6 | FAISS flat-IP index over CLIP-text interpretations |
-| `artifacts/cluster_metadata/retrieval_results.json` | 6 | hit@k / MRR metrics |
-| `data/live/live_posts.parquet` | 7 | Real Reddit posts or Wikimedia Commons uploads (deduped; real timestamps; Reddit also has engagement) |
-| `data/live/images/<post_id>.jpg` | 7 | Downloaded live post images (persist across re-runs) |
-| `data/live/live_embeddings.npy` | 7 | CLIP embeddings of live images (L2-normalised) |
-| `artifacts/cluster_metadata/live_trends.json` | 7 | Emerging themes: growth, engagement (Reddit only), representative |
+To switch from food to fashion/beauty:
+1. Edit `account.txt` with new Instagram accounts
+2. Run `python -m src.data_collector`
+3. Query: `python -m src.rag "What fashion micro-aesthetic is trending?"`
 
 ---
 
-## Data Integrity
+## Output Artifacts
 
-- **Synthetic demo data:** likes/comments/timestamps/tags/geo are generated,
-  not real — results derived from them are demonstration only.
-- **VLM interpretations, not ground truth:** cluster names/descriptions come
-  from BLIP captions of representative images.
-- **5K sample:** this build analyses a 5,000-image sample of the 69,226
-  images available locally.
-- **REAL live data (Phase 7):** posts/timestamps come from Reddit or the
-  Wikimedia Commons feed and are labelled REAL — distinct from the synthetic
-  demo corpus. Reddit adds real upvote/comment engagement; Commons honestly
-  reports "no upvote/comment signal". Images are host-owned and belong to
-  their original uploaders.
-- **No fabricated metrics:** anything not measured is omitted or marked
-  `NOT EVALUATED`.
+All generated in `data/instagram/` and `artifacts/` (regenerable via `data_collector`):
+
+| File | Description |
+|------|-------------|
+| `data/instagram/posts.parquet` | Instagram posts metadata (deduped, real timestamps) |
+| `data/instagram/all_posts.parquet` | Cumulative posts across all runs (incremental mode) |
+| `data/instagram/images/<post_id>.jpg` | Downloaded Instagram images |
+| `data/instagram/embeddings.npy` | CLIP embeddings (N, 512) |
+| `data/instagram/embed_meta.parquet` | Aligned post metadata for embeddings |
+| `data/instagram/trends.json` | Emerging themes with growth + engagement |
+| `data/instagram/rag_index.faiss` | FAISS RAG index |
+| `data/instagram/rag_chunks.json` | RAG text chunks for retrieval |
+| `artifacts/cluster_registry.json` | Stable cluster IDs, centroids, metadata |
+| `artifacts/centroid_index.faiss` | FAISS index over locked centroids |
+| `artifacts/centroid_index.json` | Stable ID mapping (FAISS position → `cls_*`) |
 
 ---
 
-_Last updated: 2026-08-17 · TrendLens honest rebuild (Phases 0–7)_
+_Last updated: 2026-08-19_

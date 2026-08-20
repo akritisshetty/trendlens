@@ -68,6 +68,8 @@ CLUSTER_MODELS_DIR = ARTIFACTS_DIR / "cluster_models"
 CLUSTER_METADATA_DIR = ARTIFACTS_DIR / "cluster_metadata"
 FAISS_DIR = ARTIFACTS_DIR / "faiss"
 FIGURES_DIR = ARTIFACTS_DIR / "figures"
+CLUSTER_REGISTRY_PATH = ARTIFACTS_DIR / "cluster_registry.json"
+CENTROID_FAISS_PATH = ARTIFACTS_DIR / "centroid_index.faiss"
 
 LEGACY_OUTPUTS_DIR = ROOT / "trendlens_outputs"
 
@@ -121,6 +123,26 @@ LIVE_DATA_WARNING = (
     "sources. Views are demo-only."
 )
 
+# ──────────────────────────────────────────────────────────────────────────
+# Instagram (Apify) — primary data source
+# ──────────────────────────────────────────────────────────────────────────
+INSTAGRAM_DIR = DATA_DIR / "instagram"
+INSTAGRAM_IMAGES_DIR = INSTAGRAM_DIR / "images"
+INSTAGRAM_POSTS_PATH = INSTAGRAM_DIR / "posts.parquet"
+INSTAGRAM_EMBEDDINGS_PATH = INSTAGRAM_DIR / "embeddings.npy"
+INSTAGRAM_TRENDS_PATH = INSTAGRAM_DIR / "trends.json"
+INSTAGRAM_RAG_INDEX_PATH = INSTAGRAM_DIR / "rag_index.faiss"
+INSTAGRAM_RAG_CHUNKS_PATH = INSTAGRAM_DIR / "rag_chunks.json"
+INSTAGRAM_ACCOUNTS_FILE = ROOT / "account.txt"
+INSTAGRAM_SCAN_DAYS = int(os.environ.get("TRENDLENS_INSTAGRAM_DAYS", "10"))
+APIFY_API_TOKEN = os.environ.get("APIFY_API_TOKEN", "")
+
+INSTAGRAM_DATA_WARNING = (
+    "REAL INSTAGRAM DATA: posts, timestamps, likes, comments, views, "
+    "hashtags, content types, and images come from public Instagram "
+    "accounts via the Apify API. Not synthetic."
+)
+
 for _d in (
     RAW_DIR,
     PROCESSED_DIR,
@@ -132,6 +154,8 @@ for _d in (
     FIGURES_DIR,
     LIVE_DIR,
     LIVE_IMAGES_DIR,
+    INSTAGRAM_DIR,
+    INSTAGRAM_IMAGES_DIR,
 ):
     _d.mkdir(parents=True, exist_ok=True)
 

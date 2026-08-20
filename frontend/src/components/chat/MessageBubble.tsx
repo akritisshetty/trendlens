@@ -74,7 +74,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div>
               <span className="font-bold">Out of scope.</span>{' '}
               {message.scopeReason ? `${message.scopeReason} ` : ''}
-              TrendLens only answers questions about social-media visual trends and photography styles — it has no general knowledge and no LLM.
+              TrendLens tracks emerging visual trends from real social media data.
             </div>
           </div>
         )}

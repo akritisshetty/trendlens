@@ -1,14 +1,18 @@
-# Large raw data
+# Legacy / large data
 train/
 train_img_filepath.txt
+trendlens_outputs/
+
+# Generated pipeline data (regenerable via data_collector)
 data/raw/
 data/processed/
 data/embeddings/
 data/metadata/
+data/instagram/
+data/live/
 
-# Generated artifacts
+# Generated artifacts (regenerable)
 artifacts/
-trendlens_outputs/
 
 # Python
 venv/
@@ -16,24 +20,24 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Secrets (.env lives at project root; see .env.example)
+# Secrets
 .env
-
-# Live data (Reddit/Wikimedia posts, images, cluster metadata)
-data/live/
-artifacts/cluster_metadata/live_trends.json
 
 # Notebooks
 .ipynb_checkpoints/
 
-# Frontend
+# Frontend build
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
 frontend/.env
 
-# Dataset / embedding formats
+# Dataset / embedding files
 *.npy
 *.parquet
 
 # OS / editor
 .DS_Store
+*.log
+.vscode
+.idea

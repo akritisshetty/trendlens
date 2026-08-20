@@ -12,8 +12,6 @@ scikit-learn>=1.4
 Pillow>=10.0
 
 # ── Deep Learning ───────────────────────────────────────────────────────
-# Colab ships torch + torchvision pre-installed; keep loose so the free
-# tier (2.6.x on T4) works too.
 torch>=2.2
 torchvision>=0.17
 
