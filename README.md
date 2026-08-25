@@ -24,10 +24,10 @@ Visual aesthetics spread before language catches up. "Cottagecore" existed as a 
 
 ## How It Works
 
-TrendLens pulls real Instagram posts from public food accounts via the [Apify API](https://apify.com/), downloads images, and runs them through a visual analysis pipeline:
+TrendLens pulls real Instagram posts from public accounts across **food, fashion, photography and beauty** via the [Apify API](https://apify.com/), downloads images, and runs them through a visual analysis pipeline:
 
 ```
-Instagram accounts (10 food accounts)
+Instagram accounts (80+ accounts across niches)
     │
     ▼  Fetch via Apify API (last 10 days)
 Real posts: images, captions, timestamps, likes, comments, views
@@ -42,9 +42,12 @@ Real posts: images, captions, timestamps, likes, comments, views
        │  Emerging candidates → HDBSCAN micro-clusters     │
        └─────────────────────────────────────────────────┘
     │
-    ▼  BLIP captioning of representative images → cluster labels
-    │
-    ▼  Temporal analysis: daily counts, growth rate, emerging score
+     ▼  BLIP captioning of representative images → cluster labels
+     │
+     ▼  CLIP zero-shot style tagging (framing / lighting / grading /
+        process / composition) → per-cluster "how it is shot" profile
+     │
+     ▼  Temporal analysis: daily counts, growth rate, emerging score
     │
     ▼  FAISS RAG index (sentence-transformer embeddings)
     │
@@ -127,6 +130,9 @@ Cluster IDs are stable UUIDs (`cls_*`) that persist across runs, enabling genuin
 python -m src.rag "What cafe aesthetic is rising this week?"
 python -m src.rag "What food photography styles are trending on Instagram?"
 python -m src.rag "What kind of latte art gets the most engagement?"
+python -m src.rag "What street style aesthetics are trending on Instagram?"
+python -m src.rag "What editing and colour grading styles are trending in photography?"
+python -m src.rag "What makeup looks are trending on Instagram?"
 ```
 
 ### 3. API server
@@ -169,22 +175,18 @@ TRENDLENS_API_PORT=8000
 
 ## Instagram Accounts
 
-The `account.txt` file lists the Instagram accounts to monitor. Currently configured for **food / cafe aesthetics**:
+The `account.txt` file lists the Instagram accounts to monitor — one URL or username per line. Currently configured for four niches (~81 accounts):
 
-```
-artplatterforyou
-healthyyfoodiary
-sakandpepper
-zamanaindia
-kraving.bykay
-le.kene
-fionasfunkyfood
-whipitupwithwitz
-3idiotsrichmond
-holistic.jo
-```
+| Niche | Example accounts |
+|-------|------------------|
+| Food / cafe / dessert | `food52`, `tasty`, `jamieoliver`, `tartinebaker`, `frenchpress.latteart` |
+| Fashion / street style | `voguemagazine`, `highsnobiety`, `styledumonde`, `matildadjerf`, `tokyofashion` |
+| Photography | `natgeo`, `magnumphotos`, `jordi.koalitic`, `alan_schaller`, `moodygrams` |
+| Beauty / skincare | `hudabeauty`, `rarebeauty`, `glossier`, `ctilburymakeup`, `theordinary` |
 
-To add fashion/beauty accounts, edit `account.txt` with one Instagram URL or username per line.
+CLIP clusters images by visual semantics, so posts from different niches naturally form separate clusters — you can query any niche specifically (`"What street style aesthetics are trending?"`) and retrieval surfaces only the relevant clusters.
+
+To add or remove accounts (or a whole new niche), edit `account.txt` with one Instagram URL or username per line. Note: the file is parsed literally, so no comment lines.
 
 ---
 
@@ -198,6 +200,7 @@ To add fashion/beauty accounts, edit `account.txt` with one Instagram URL or use
 | Clustering | **HDBSCAN** (visual trend group discovery) |
 | Cluster tracking | **FAISS centroid KNN** + stable UUID-based registry |
 | Visual captioning | **BLIP** `blip-image-captioning-base` |
+| Photography-style tagging | **CLIP zero-shot** over a curated style prompt bank (framing / lighting / grading / process / composition) |
 | Temporal analysis | Daily post counts, growth rate, emerging score |
 | Vector index | **FAISS** `IndexFlatIP` over sentence-transformer embeddings |
 | RAG retrieval | **sentence-transformers** `all-MiniLM-L6-v2` |
@@ -238,7 +241,7 @@ python -m src.data_collector --baseline   # force full re-cluster
 | Task | Time (estimated) |
 |------|-----------------|
 | Apify fetch | ~30s (depends on API) |
-| Image download | ~2min (10 accounts, 50 posts each) |
+| Image download | ~2min (per ~10 accounts, 50 posts each) |
 | CLIP embeddings (500 images) | ~1min |
 | UMAP + HDBSCAN (baseline) | ~30s |
 | BLIP captioning | ~2min |
@@ -249,4 +252,4 @@ python -m src.data_collector --baseline   # force full re-cluster
 
 ---
 
-_TrendLens · Instagram visual trend detection · Last updated: 2026-08-19_
+_TrendLens · Instagram visual trend detection · Last updated: 2026-08-24_

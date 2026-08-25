@@ -5,7 +5,8 @@
 > TrendLens detects **visual trends** from Instagram image clusters. It answers
 > questions about what visual aesthetics are rising, what styles get engagement,
 > and how to photograph subjects for maximum impact — all grounded in real
-> Instagram data from 10 monitored food/lifestyle accounts.
+> Instagram data from ~80 monitored accounts across food, fashion, photography
+> and beauty.
 
 ---
 
@@ -118,21 +119,24 @@ python -m src.rag "What separates high-engagement food photos from low-engagemen
 
 > "What about [specific niche]?"
 
-TrendLens is configured for **food / cafe aesthetics** from 10 Instagram
-accounts. It can answer questions about:
+TrendLens monitors **food, fashion, photography and beauty** accounts on
+Instagram. Example queries per niche:
 
 | Niche | Example Query |
 |-------|---------------|
 | Coffee | "What latte art styles are trending?" |
 | Pastries | "What croissant or donut styles are popular?" |
 | Healthy food | "What smoothie bowl aesthetics are rising?" |
-| Brunch | "What brunch plating styles get engagement?" |
-| Desserts | "What cake decorating trends are emerging?" |
 | Street food | "What street food photography styles are hot?" |
-| Baking | "What sourdough or bread photography is trending?" |
-| Plating | "What minimalist plating styles are popular?" |
-| Flat lays | "What flat lay compositions work for food?" |
-| Lighting | "What natural light styles work for cafe content?" |
+| Fashion / street style | "What street style aesthetics are trending on Instagram?" |
+| Outfit styling | "What layering styles are getting engagement?" |
+| Menswear | "What menswear styling trends are emerging?" |
+| Photography (general) | "What editing and colour grading styles are trending in photography?" |
+| Portrait / night photography | "What portrait lighting styles get the most engagement?" |
+| Landscape / wildlife | "What wildlife and nature photography visuals are trending?" |
+| Makeup | "What makeup looks are trending on Instagram?" |
+| Skincare | "What skincare aesthetics are rising?" |
+| Cross-niche | "What visual trends span both fashion and beauty content right now?" |
 
 ---
 
@@ -171,7 +175,7 @@ TrendLens will **not** answer questions about:
 
 | Source | What it provides |
 |--------|-----------------|
-| **Instagram (Apify)** | Real posts from 10 food accounts — images, captions, timestamps, likes, comments, views, hashtags |
+| **Instagram (Apify)** | Real posts from ~80 accounts across food, fashion, photography and beauty — images, captions, timestamps, likes, comments, views, hashtags |
 | **Reddit** (optional) | Posts from `r/foodporn`, `r/coffee` |
 | **Wikimedia Commons** (optional) | Images for `latte art`, `coffee`, `street food`, `breakfast` |
 
@@ -187,4 +191,4 @@ TrendLens will **not** answer questions about:
 
 ---
 
-_Last updated: 2026-08-19_
+_Last updated: 2026-08-24_

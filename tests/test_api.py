@@ -1,10 +1,26 @@
 import json
 import threading
 
+import pytest
+
+import config
 from src import api
+
+# Legacy (SMPD) pipeline artifacts — absent in Instagram-only checkouts.
+_LEGACY_ARTIFACTS = [
+    config.CLUSTER_METADATA_DIR / "trend_metrics.csv",
+    config.CLUSTER_METADATA_DIR / "cluster_captions.json",
+    config.CLUSTER_METADATA_DIR / "representatives.json",
+    config.EMBEDDINGS_DIR / "cluster_text_embeddings.npy",
+]
+_requires_legacy = pytest.mark.skipif(
+    any(not p.exists() for p in _LEGACY_ARTIFACTS),
+    reason="legacy pipeline artifacts not generated on this checkout",
+)
 
 
 class TestHandlers:
+    @_requires_legacy
     def test_health(self):
         h = api.handle_health()
         assert h["status"] == "ok"
@@ -18,8 +34,10 @@ class TestHandlers:
         with pytest.raises(ValueError):
             api.handle_rag_query({})
 
-    def test_rag_query_runs(self):
+    @_requires_legacy
+    def test_rag_query_runs(self, monkeypatch):
         # Uses the real pipeline on the real index (small, cached artifacts).
+        monkeypatch.setattr("src.rag.load_instagram_trends", lambda: None)
         res = api.handle_rag_query({"query": "a cup of coffee", "k": 3})
         assert res["query"] == "a cup of coffee"
         assert res["answer"]
@@ -28,6 +46,7 @@ class TestHandlers:
         assert res["disclaimer"]
         assert res["inScope"] is True
 
+    @_requires_legacy
     def test_rag_query_refuses_out_of_scope(self):
         res = api.handle_rag_query(
             {"query": "write a c program to print hello world", "k": 3}
@@ -37,12 +56,14 @@ class TestHandlers:
         assert res["supportingImages"] == []
         assert "Out of scope" in res["answer"]
 
+    @_requires_legacy
     def test_trends_sorted(self):
         t = api.handle_trends()
         assert "trends" in t and len(t["trends"]) >= 1
         scores = [x["trend_score_growth_size_stability"] for x in t["trends"]]
         assert scores == sorted(scores, reverse=True)
 
+    @_requires_legacy
     def test_clusters_records(self):
         c = api.handle_clusters()
         assert "clusters" in c and len(c["clusters"]) >= 1
@@ -51,6 +72,7 @@ class TestHandlers:
                     "representative_image", "representative_image_url"]:
             assert key in row
 
+    @_requires_legacy
     def test_predict_is_honest(self):
         p = api.handle_predict({"clusterId": 0})
         assert p["status"] == "NOT EVALUATED"
@@ -59,13 +81,16 @@ class TestHandlers:
         assert p["observedMeanEngagement"] is not None
         assert "NOT EVALUATED" in p["note"]
 
+    @_requires_legacy
     def test_predict_missing_cluster(self):
         p = api.handle_predict({"clusterId": 99999})
         assert p["clusterId"] is None
 
 
 class TestHttpServer:
-    def test_server_roundtrip(self):
+    @_requires_legacy
+    def test_server_roundtrip(self, monkeypatch):
+        monkeypatch.setattr("src.rag.load_instagram_trends", lambda: None)
         server = api.ThreadingHTTPServer(("127.0.0.1", 0), api._Handler)
         port = server.server_address[1]
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -91,6 +116,7 @@ class TestHttpServer:
             server.shutdown()
             server.server_close()
 
+    @_requires_legacy
     def test_image_endpoint_serves_whitelisted(self):
         server = api.ThreadingHTTPServer(("127.0.0.1", 0), api._Handler)
         port = server.server_address[1]
@@ -122,6 +148,7 @@ class TestHttpServer:
             server.shutdown()
             server.server_close()
 
+    @_requires_legacy
     def test_image_endpoint_rejects_non_whitelisted(self):
         server = api.ThreadingHTTPServer(("127.0.0.1", 0), api._Handler)
         port = server.server_address[1]

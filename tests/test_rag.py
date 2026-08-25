@@ -7,8 +7,20 @@ import pytest
 import config
 from src import rag
 
+# Legacy (SMPD) pipeline artifacts — absent in Instagram-only checkouts.
+_LEGACY_ARTIFACTS = [
+    config.CLUSTER_METADATA_DIR / "cluster_captions.json",
+    config.CLUSTER_METADATA_DIR / "representatives.json",
+    config.CLUSTER_METADATA_DIR / "trend_metrics.csv",
+]
+_requires_legacy = pytest.mark.skipif(
+    any(not p.exists() for p in _LEGACY_ARTIFACTS),
+    reason="legacy pipeline artifacts not generated on this checkout",
+)
+
 
 class TestClusterRecord:
+    @_requires_legacy
     def test_uses_real_artifact_fields(self):
         rec = rag._cluster_record(cluster_id=0, similarity=0.9, rank=1)
         assert rec["cluster_id"] == 0
@@ -24,6 +36,7 @@ class TestClusterRecord:
                     "average_engagement", "recent_growth", "trend_score"]:
             assert key in rec
 
+    @_requires_legacy
     def test_representative_image_keys(self):
         rec = rag._cluster_record(cluster_id=0, similarity=0.9, rank=1)
         assert "representative_image" in rec
@@ -34,6 +47,7 @@ class TestClusterRecord:
 
 
 class TestBuildContext:
+    @_requires_legacy
     def test_returns_disclaimer_and_records(self):
         with mock.patch.object(rag, "_load_retrieval") as mock_rt, \
              mock.patch("src.retrieval.embed_texts") as mock_emb, \
@@ -183,7 +197,8 @@ class TestImageUrl:
 
 class TestRunQuery:
     def test_response_shape(self):
-        with mock.patch.object(rag, "build_context") as mock_bc, \
+        with mock.patch.object(rag, "load_instagram_trends", return_value=None), \
+             mock.patch.object(rag, "build_context") as mock_bc, \
              mock.patch.object(rag, "classify_scope") as mock_scope:
             mock_scope.return_value = {
                 "in_scope": True, "method": "anchors", "reason": None,
@@ -205,7 +220,8 @@ class TestRunQuery:
             assert res["scopeMethod"] == "anchors"
 
     def test_out_of_scope_refuses_without_context(self):
-        with mock.patch.object(rag, "classify_scope") as mock_scope:
+        with mock.patch.object(rag, "load_instagram_trends", return_value=None), \
+             mock.patch.object(rag, "classify_scope") as mock_scope:
             mock_scope.return_value = {
                 "in_scope": False, "method": "keywords",
                 "reason": "This looks like a programming question.",
@@ -215,7 +231,7 @@ class TestRunQuery:
             assert res["scopeMethod"] == "keywords"
             assert res["retrievedClusters"] == []
             assert res["supportingImages"] == []
-            assert "Out of scope" in res["answer"]
+            assert "doesn't fit that scope" in res["answer"]
             assert "hello world" in res["answer"]
 
     def test_live_intent_stays_rule_based_not_llm(self):
@@ -234,7 +250,8 @@ class TestRunQuery:
                 "representative_image_url": "/api/live-images?name=w.jpg",
             }],
         }
-        with mock.patch.object(rag, "classify_scope") as mock_scope, \
+        with mock.patch.object(rag, "load_instagram_trends", return_value=None), \
+             mock.patch.object(rag, "classify_scope") as mock_scope, \
              mock.patch.object(rag, "build_context") as mock_bc, \
              mock.patch.object(rag, "load_live_trends") as mock_live, \
              mock.patch("src.llm.format_answer_with_llm") as mock_llm:

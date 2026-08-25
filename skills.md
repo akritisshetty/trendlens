@@ -35,9 +35,11 @@ through semantic retrieval + honest formatting.
 **Research question:** Can visual clusters derived from Instagram image
 embeddings reveal emerging patterns before textual labels appear?
 
-**Current niche:** Food / cafe aesthetics (10 Instagram accounts).
+**Current niches:** Food/cafe, fashion/street style, photography and
+beauty/skincare (~81 Instagram accounts in `account.txt`).
 
-**Extensible to:** Fashion, beauty, skincare — by editing `account.txt`.
+**Extensible to:** Any visual niche — travel, interiors, fitness — by
+editing `account.txt`. CLIP clusters whatever images the pipeline is fed.
 
 ---
 
@@ -50,7 +52,7 @@ trendlens/
 ├── README.md                   # User-facing overview
 ├── commands.md                 # All commands to run the project
 ├── skills.md                   # This document — canonical context
-├── account.txt                 # Instagram accounts to monitor (food niche)
+├── account.txt                 # Instagram accounts to monitor (food, fashion, photography, beauty)
 ├── .env                        # APIFY_API_TOKEN + optional LLM config
 ├── .env.example                # Template for .env
 ├── src/                        # Pipeline modules (python -m src.<module>)
@@ -327,14 +329,34 @@ No Apify SDK needed — raw `requests` calls to the Apify REST API.
 
 ---
 
-## 9. Extending to Fashion/Beauty
+## 9. Multi-Niche Monitoring
 
-1. Edit `account.txt` with fashion/beauty Instagram accounts
-2. Run `python -m src.data_collector`
-3. Ask fashion-specific queries
+`account.txt` currently spans four niches (~81 accounts):
 
-The pipeline is niche-agnostic — it clusters whatever images you feed it.
+| Niche | Example accounts |
+|-------|------------------|
+| Food / cafe / dessert | `food52`, `tasty`, `halfbakedharvest`, `frenchpress.latteart` |
+| Fashion / street style | `voguemagazine`, `highsnobiety`, `styledumonde`, `matildadjerf`, `tokyofashion` |
+| Photography | `natgeo`, `magnumphotos`, `jordi.koalitic`, `alan_schaller`, `moodygrams` |
+| Beauty / skincare | `hudabeauty`, `rarebeauty`, `glossier`, `ctilburymakeup` |
+
+**How cross-niche works:** the pipeline is niche-agnostic — CLIP clusters
+images by visual semantics, so posts from different niches naturally land
+in separate clusters. RAG retrieval is semantic, so a query like "What
+street style aesthetics are trending?" surfaces fashion clusters only.
+
+### Adding another niche
+
+1. Append Instagram URLs/usernames to `account.txt`
+   (one per line, no comment lines — the parser is literal)
+2. Run `python -m src.data_collector` (incremental) or `--baseline`
+   for a clean single-niche registry
+3. Ask niche-specific queries
+
+All new accounts were verified as real, active public Instagram accounts
+(2026-08). Note: more accounts = larger Apify fetch per run; use `--days N`
+to bound the scan window.
 
 ---
 
-_Last updated: 2026-08-19_
+_Last updated: 2026-08-24_

@@ -37,16 +37,35 @@ def _json(data: Any) -> tuple[bytes, int]:
 
 
 def handle_health() -> dict[str, Any]:
+    """Service status. Never 500s on missing optional artifacts: reports
+    whichever corpus is actually available (legacy SMPD sample or live
+    Instagram data) so Instagram-only deployments don't look dead."""
     import pandas as pd
 
-    metrics = pd.read_csv(config.CLUSTER_METADATA_DIR / "trend_metrics.csv")
+    n_clusters = 0
+    dataset = "5K sampled images of 69,226 available"
+    timestamps = "neutral synthetic (demo)"
+    try:
+        metrics = pd.read_csv(config.CLUSTER_METADATA_DIR / "trend_metrics.csv")
+        n_clusters = int(len(metrics))
+    except Exception:  # noqa: BLE001 — legacy artifacts absent
+        from src.rag import load_instagram_trends
+
+        trends = load_instagram_trends()
+        if trends:
+            n_clusters = int(
+                trends.get("n_themes") or len(trends.get("themes") or [])
+            )
+            dataset = f"real Instagram posts ({int(trends.get('n_posts') or 0)} fetched)"
+            timestamps = "real Instagram timestamps"
+
     return {
         "status": "ok",
         "service": "TrendLens Python backend (FAISS-only, no LLM)",
-        "clustersAnalyzed": int(len(metrics)),
-        "totalClustersAnalyzed": int(len(metrics)),
-        "dataset": "5K sampled images of 69,226 available",
-        "timestamps": "neutral synthetic (demo)",
+        "clustersAnalyzed": n_clusters,
+        "totalClustersAnalyzed": n_clusters,
+        "dataset": dataset,
+        "timestamps": timestamps,
         "mode": "faiss-only",
         "llmEnabled": False,
         "timestamp": pd.Timestamp.now("UTC").isoformat(),

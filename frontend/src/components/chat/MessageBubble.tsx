@@ -88,7 +88,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
-            <div className="prose prose-stone dark:prose-invert max-w-none text-sm sm:text-base leading-relaxed">
+            <div className="prose prose-stone dark:prose-invert max-w-none text-sm sm:text-base leading-relaxed [&_p]:my-2 [&_p+ul]:mt-1 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-1.5 [&_strong]:font-semibold [&_em]:text-[#7A736C] dark:[&_em]:text-[#A8A096]">
               <Markdown>{message.content}</Markdown>
             </div>
           )}
@@ -100,11 +100,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <span className="text-[11px] font-medium uppercase tracking-wider text-[#7A736C] dark:text-[#A8A096] flex items-center gap-1 mb-1.5">
               <ImageIcon className="w-3.5 h-3.5" /> Representative images
             </span>
-            <div className="grid grid-cols-3 gap-2">
-              {message.supportingImages.slice(0, 6).map((img, i) => (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {message.supportingImages.slice(0, 8).map((img, i) => (
                 <div
                   key={i}
-                  className="h-20 rounded-xl overflow-hidden border border-[#E7DED2] dark:border-[#3E3832] bg-[#F8F5F0] dark:bg-[#1C1815]"
+                  className="h-24 rounded-xl overflow-hidden border border-[#E7DED2] dark:border-[#3E3832] bg-[#F8F5F0] dark:bg-[#1C1815]"
                 >
                   <img
                     src={img}

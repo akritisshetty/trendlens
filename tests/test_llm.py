@@ -51,7 +51,7 @@ class TestFormatting:
 
         def fake_post(url, params=None, json=None, timeout=None, headers=None):
             assert "key=k" in url
-            assert "gemini-3.5-flash" in url
+            assert llm.llm_config()["model"] in url
             assert "contents" in (json or {})
 
             class R:

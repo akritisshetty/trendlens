@@ -47,6 +47,7 @@ import numpy as np
 import pandas as pd
 
 import config
+from src.style_tags import format_style_tags
 
 WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
 WIKIMEDIA_USER_AGENT = "TrendLens/0.1 (visual-trend demo; no engagement signal)"
@@ -521,11 +522,21 @@ def detect_trends(
     recent_cutoff = now - timedelta(days=recent_days)
     prior_cutoff = now - timedelta(days=recent_days + prior_days)
 
+    # Zero-shot photography-style scores for every embedded image (how it
+    # is shot — framing, lighting, grading, process — not what is shot).
+    style_scores = None
+    try:
+        from src.style_tags import aggregate_styles, compute_style_scores
+        style_scores = compute_style_scores(np.asarray(emb, dtype="float32"))
+    except Exception as e:  # noqa: BLE001 — styling must never break detection
+        print(f"style tagging skipped ({e})")
+
     themes: list[dict[str, Any]] = []
     for label in sorted(set(labels.tolist())):
         if label < 0:
             continue  # HDBSCAN noise — not a theme
-        members = df[labels == label].reset_index(drop=True)
+        mask = labels == label
+        members = df[mask].reset_index(drop=True)
         recent = members[members["created_utc"] >= recent_cutoff.isoformat()]
         prior = members[
             (members["created_utc"] >= prior_cutoff.isoformat())
@@ -566,6 +577,14 @@ def detect_trends(
 
         keywords = _title_keywords(best["title"])
         kw_joined = ", ".join(keywords[:4]).lower() or "the theme's look"
+
+        theme_style: list[dict[str, Any]] = []
+        if style_scores is not None:
+            from src.style_tags import aggregate_styles
+            theme_style = aggregate_styles(
+                style_scores, indices=[int(i) for i in np.flatnonzero(mask)]
+            )
+
         themes.append(
             {
                 "name": (keywords[0] if keywords else "unnamed theme")
@@ -574,6 +593,7 @@ def detect_trends(
                 "keywords_emoji": "🔥",
                 "blip_caption": caption,
                 "blip_confidence": round(float(conf), 4),
+                "style_tags": theme_style,
                 "subreddits": sorted(members["subreddit"].unique().tolist()),
                 "channel_label": channel_label,
                 "source": theme_source,
@@ -598,6 +618,11 @@ def detect_trends(
                 "replicate": (
                     f"Shoot images that feature {kw_joined}"
                     + (f"; the representative post shows “{caption}”" if caption else "")
+                    + (
+                        f", typically shot as {format_style_tags(theme_style)}"
+                        if theme_style
+                        else ""
+                    )
                     + "."
                 ),
             }

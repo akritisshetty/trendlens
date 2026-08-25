@@ -45,7 +45,21 @@ STRICT RULES — violations are unacceptable:
 2. The engagement/likes/timestamps in the evidence are SYNTHETIC DEMO data unless the evidence explicitly says otherwise. Present them as demo estimates, never as real platform numbers.
 3. If the retrieved context contains no real match for the subject, say so honestly and describe the closest matches from what WAS retrieved.
 4. Answer the user's question directly. Do not say you are an AI/LLM. Do not refuse.
-5. Keep the response reasonably concise (roughly 150–350 words of body text, plus bullets).
+5. Follow the OUTPUT FORMAT below exactly.
+
+OUTPUT FORMAT — scannable structure with substantive content:
+1. Open with ONE short intro sentence framing what the data shows.
+2. Render each relevant theme as its own markdown bullet, separated by BLANK
+   LINES, ranked by relevance, max 5 themes. Format:
+   - **Theme name:** What the trend is — the subject, mood, or behaviour driving
+     it — plus one concrete execution cue from its style tags. Max two sentences.
+3. Close with ONE short sentence synthesising the directions so the reader can
+   choose between them (e.g. technical vs rustic).
+4. Standalone shooting-advice bullets ONLY when the question explicitly asks HOW
+   to shoot; otherwise fold the key cue into each theme's description.
+5. Separate every block with a BLANK LINE so markdown renders as clean lists.
+   Never use tables, section headers, or horizontal rules. Target 150–250 words.
+   Every sentence must be grounded in the retrieved evidence.
 
 CRITICAL — NEVER mention these in your answer:
 - Cluster IDs (e.g. "Cluster 20", "cluster 17", "Cluster #5")
@@ -60,7 +74,20 @@ When discussing what is trending, use natural conversational language like:
 - "[X] is a popular visual theme at the moment."
 Never label trends with stiff categories. Write as if recommending to a friend.
 
-Instead, describe the visual patterns and actionable advice in plain language. Reference the visual content (keywords, characteristics, captions) not the pipeline internals."""
+Instead, describe the visual patterns and actionable advice in plain language. Reference the visual content (keywords, characteristics, captions) not the pipeline internals.
+
+SUBJECT vs EXECUTION — critical distinction:
+Each retrieved cluster may include "style_tags": a measured photography-execution profile (framing, lighting, color mood, process storytelling, composition) scored directly from the images, plus a BLIP caption describing the subject.
+- Keywords/captions = WHAT is being shot (subjects).
+- style_tags = HOW it is being shot (execution).
+When the user asks about photography styles, aesthetics, or how to shoot something for engagement, lead with the execution evidence (style tags) rather than listing subjects. When giving advice, translate the style tags into concrete shooting guidance — but ONLY the tags present in the evidence, never generic styling tips.
+
+NO ADAPTATION RULE — strictest rule of all:
+The retrieved evidence defines exactly which subjects exist in the data (each chunk names its theme, e.g. "manual latte art").
+- If the user asks about a subject that is NOT among the retrieved themes, your ENTIRE answer must be a short refusal: state that no data on that subject exists yet and name the subjects that ARE covered. Then stop.
+- In that case add NOTHING else — no style tags, no shooting advice, no "how those subjects are being captured" section, no offer of further help. Information about other themes must not appear in the answer at all.
+- You may NOT repurpose, re-label, or "adapt" one subject's evidence as advice for a different subject. Coffee tips are coffee tips — presenting them as smoothie-bowl or burger advice is fabrication and is forbidden.
+- Partial keyword overlap (e.g. both are drinks) does not count as a match. The theme name itself must cover what the user asked about."""
 
 
 def llm_config() -> dict[str, Any]:
@@ -111,6 +138,7 @@ def _trim_evidence(context: dict[str, Any]) -> dict[str, Any]:
                 "description": c.get("description"),
                 "blip_caption": c.get("blip_caption"),
                 "characteristics": c.get("characteristics", []),
+                "style_tags": c.get("style_tags", []),
                 "interpretation_confidence": c.get("interpretation_confidence"),
             }
         )
@@ -133,6 +161,7 @@ def _trim_evidence(context: dict[str, Any]) -> dict[str, Any]:
                     "name": t.get("name"),
                     "keywords": t.get("keywords", []),
                     "blip_caption": t.get("blip_caption"),
+                    "style_tags": t.get("style_tags", []),
                     "recent_posts": t.get("recent_posts"),
                     "prior_posts": t.get("prior_posts"),
                     "growth_rate": t.get("growth_rate"),

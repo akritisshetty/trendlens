@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 import config
+from src.style_tags import format_style_tags, taxonomy_record
 
 _LIFECYCLE_EMOJI = {"Rising": "📈", "Stable": "📊", "Declining": "📉"}
 
@@ -45,6 +46,15 @@ def load_interpretations() -> list[dict[str, Any]]:
             (config.CLUSTER_METADATA_DIR / "cluster_captions.json").read_text()
         )["interpretations"]
     return _CACHE["interpretations"]
+
+
+def _total_clusters_safe() -> int:
+    """Cluster count for response metadata; 0 when legacy artifacts are
+    absent (e.g. Instagram-only deployments) instead of crashing refusals."""
+    try:
+        return len(load_interpretations())
+    except Exception:  # noqa: BLE001 — refusal must never 500 on missing metadata
+        return 0
 
 
 def load_metrics() -> pd.DataFrame:
@@ -91,6 +101,33 @@ _INSTAGRAM_TRENDS_CACHE: Optional[dict[str, Any]] = None
 _INSTAGRAM_CHUNKS_CACHE: list[dict[str, Any]] = []
 _INSTAGRAM_RAG_MODEL = None
 _INSTAGRAM_RAG_INDEX = None
+
+
+def instagram_image_urls(theme_names: list[str], limit: int = 4) -> list[str]:
+    """Representative image URLs for the named Instagram themes.
+
+    Maps theme name -> representative_post_id via trends.json, checks the
+    image exists on disk, and returns URLs served by /api/instagram-images.
+    """
+    trends = load_instagram_trends() or {}
+    by_name = {
+        t.get("name"): t.get("representative_post_id")
+        for t in (trends.get("themes") or [])
+    }
+    img_dir = config.INSTAGRAM_IMAGES_DIR
+    urls: list[str] = []
+    for name in theme_names[:limit + 2]:
+        pid = by_name.get(name)
+        if not pid:
+            continue
+        for ext in (".jpg", ".jpeg", ".png", ".webp"):
+            fname = f"{pid}{ext}"
+            if (img_dir / fname).is_file():
+                urls.append(f"/api/instagram-images?name={fname}")
+                break
+        if len(urls) >= limit:
+            break
+    return urls
 
 
 def load_instagram_trends() -> Optional[dict[str, Any]]:
@@ -185,29 +222,43 @@ def format_instagram_trends_answer(query: str, trends: dict[str, Any]) -> str:
         if relevant:
             themes = relevant
 
+    def _dirs(t: dict, limit: int = 2) -> list[str]:
+        out: list[str] = []
+        for st in (t.get("style_tags") or [])[:limit + 1]:
+            try:
+                d = taxonomy_record(st["tag"]).get("direction")
+            except (KeyError, TypeError):
+                d = None
+            if d and d not in out:
+                out.append(d)
+            if len(out) >= limit:
+                break
+        return out
+
     lines: list[str] = []
 
-    for t in themes[:4]:
-        kw = t.get("keywords", [])
+    # Decision-first opener from the strongest trending look
+    lead = _dirs(themes[0], limit=1)
+    if lead:
+        lines.append(
+            f"**What to shoot now:** {lead[0]} — this execution is winning across trending themes."
+        )
+    else:
+        lead_kw = ", ".join(str(x) for x in (themes[0].get("keywords") or [])[:3])
+        lines.append(f"**What to shoot now:** {lead_kw or themes[0].get('name', '')} is leading activity.")
+    lines.append("")
+
+    for i, t in enumerate(themes[:5], 1):
         name = t.get("name", "this visual style")
-        caption = t.get("blip_caption", "")
+        dirs = _dirs(t)
+        cue = "; ".join(dirs) if dirs else ", ".join(str(x) for x in (t.get("keywords") or [])[:3])
+        cap = (t.get("blip_caption") or "").strip().rstrip(".")
+        cap = re.sub(r"^(a|an|the)\s+", "", cap, flags=re.IGNORECASE)
+        if cap:
+            cue += f" — e.g. {cap}"
+        lines.append(f"{i}. **{name}** — {cue}")
 
-        # Build a natural sentence
-        kw_str = ", ".join(kw[:4]) if kw else name
-
-        # Opening: what is trending
-        sentence = f"Currently, **{name}** is trending ({kw_str})"
-
-        # Add visual guidance from the caption
-        if caption:
-            # Clean up the caption — strip leading articles, lowercase start
-            cap = caption.strip().rstrip(".")
-            cap = re.sub(r"^(A |An |The )", "", cap, flags=re.IGNORECASE)
-            sentence += f". To capture this look, think {cap}"
-        sentence += "."
-        lines.append(sentence)
-
-    return "\n\n".join(lines)
+    return "\n".join(lines)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -722,107 +773,58 @@ def format_advice_answer(query: str, context: dict[str, Any]) -> str:
     caption = top.get("blip_caption") or ""
 
     lines: list[str] = []
-    lines.append(f"## 📸 How to shoot \"{subject}\" for engagement")
+    lines.append(f"## 📸 How to shoot \"{subject}\"")
+    lines.append(f"Closest real look in the index: **{top['name']}**")
+    lines.append("")
     lines.append(
-        f"I matched \"{subject}\" against the visual trend index and pulled the "
-        "closest real look."
-    )
-    lines.append(
-        "Everything below comes **only from the keywords and captions of the "
-        "closest visual patterns** — no invented styling advice."
+        "Every direction below comes **only from the keywords, captions and "
+        "measured stats of these real clusters** — no invented styling advice."
     )
     lines.append("")
 
-    lines.append(f"### Closest real look — \"{top['name']}\"")
-    if caption:
-        lines.append(f"> \"{caption}\"")
-    if feats:
-        lines.append("Top visual keywords: " + ", ".join(feats))
-    lines.append("")
-
-    lines.append("**What the data says about this look:**")
-    if feats:
-        lines.append(
-            f"- 🎯 **Subject anchor:** `{feats[0]}` is the defining element of every close image."
-        )
-        if len(feats) >= 3:
-            lines.append(
-                f"- 🎨 **Look & feel:** `{', '.join(feats[1:4])}` are the words that characterise the "
-                "scene — use them as cues for colours, textures and props."
-            )
-        if len(feats) >= 5:
-            lines.append(
-                f"- 🖼️ **Composition cues:** `{', '.join(feats[4:])}` round out the frame in the source images."
-            )
-    if caption:
-        lines.append(
-            f"- 📐 **The representative shot:** \"{caption}\" — reproduce that moment (the action and "
-            "setting it describes) to stay closest to a look that already exists in the index."
-        )
+    # Execution guidance from measured style tags first, then keywords
+    shoot: list[str] = []
+    for st in top.get("style_tags") or []:
+        try:
+            d = taxonomy_record(st["tag"]).get("direction")
+        except (KeyError, TypeError):
+            d = None
+        if d and d not in shoot:
+            shoot.append(d)
+        if len(shoot) >= 3:
+            break
+    if not shoot and feats:
+        shoot = [f"make `{f}` the anchor of the frame" for f in feats[:3]]
+    for s in shoot:
+        lines.append(f"- {s}")
+    if caption and not shoot:
+        lines.append(f"- Reference shot: \"{caption}\"")
     lines.append("")
 
     if len(clusters) > 1:
-        subject_set = set(feats)
-
-        def _overlap(c: dict[str, Any]) -> int:
-            return len(subject_set & set(_feats(c)))
-
         best_eng = max(clusters, key=lambda c: c.get("average_engagement") or -1)
-        best_trend = max(clusters, key=lambda c: c.get("trend_score") or -1)
-        eng_is_top = best_eng["cluster_id"] == top["cluster_id"]
-        trend_is_top = best_trend["cluster_id"] == top["cluster_id"]
-        eng_shared = subject_set & set(_feats(best_eng))
-        trend_shared = subject_set & set(_feats(best_trend))
-
-        lines.append("**\"Max engagement\" — what the index actually supports:**")
-        if eng_is_top:
+        if best_eng["cluster_id"] == top["cluster_id"]:
             lines.append(
-                "- Your subject's own look already has the **highest measured engagement** among the "
-                "retrieved matches — follow the look above."
-            )
-        elif eng_shared:
-            lines.append(
-                f"- Among the retrieved matches, the \"{best_eng['name']}\" look has the highest measured "
-                f"engagement and shares subject keywords (`{', '.join(sorted(eng_shared))}`). Borrowing those elements is the only "
-                "engagement edge the data can point to."
+                "This look already has the **highest measured engagement** "
+                "among the retrieved matches."
             )
         else:
-            lines.append(
-                f"- The highest-engagement look is \"{best_eng['name']}\" "
-                f"but its keywords "
-                f"(`{', '.join(_feats(best_eng)[:3])}`) do **not** overlap your subject — copying it would "
-                "change the subject, not improve your shot. No engagement advantage to borrow."
-            )
-        if trend_is_top:
-            lines.append(
-                "- Your subject's look also **leads on trend momentum** among the retrieved matches."
-            )
-        elif trend_shared:
-            lines.append(
-                f"- For momentum, \"{best_trend['name']}\" leads on trend momentum "
-                f"and overlaps your subject "
-                f"(`{', '.join(sorted(trend_shared))}`)."
-            )
-        else:
-            lines.append(
-                f"- The leading trending look is \"{best_trend['name']}\", but its look is a different subject — "
-                "no style to borrow."
-            )
+            shared = set(feats) & set(_feats(best_eng))
+            if shared:
+                lines.append(
+                    f"The \"{best_eng['name']}\" look has the highest measured engagement among the "
+                    f"matches and shares `{', '.join(sorted(shared))}` — borrowing those elements is the "
+                    "only engagement edge the data can point to."
+                )
+            else:
+                lines.append(
+                    f"The highest-engagement look is \"{best_eng['name']}\", but its keywords "
+                    f"(`{', '.join(_feats(best_eng)[:3])}`) do **not** overlap your subject — copying it would "
+                    "change the subject, not improve your shot. No engagement advantage to borrow."
+                )
         lines.append("")
 
-    lines.append("### ⚠️ Honest limits")
-    lines.append(
-        "- Engagement/likes/timestamps are **synthetic demo data** — not real platform signals, so "
-        "\"max engagement\" advice is demonstration only."
-    )
-    lines.append(
-        "- Cluster names and captions are **VLM interpretations, not ground truth** about what makes a "
-        "photo popular."
-    )
-    lines.append(
-        f"- This is what the **5,000-image sample** actually contains for \"{subject}\". If no visual pattern covers "
-        "the subject, the closest matches are the best evidence available."
-    )
+    lines.append("_Engagement figures are synthetic demo data; names/captions are VLM interpretations._")
     return "\n".join(lines)
 
 
@@ -837,24 +839,14 @@ def format_answer(query: str, context: dict[str, Any]) -> str:
         ])
 
     lines: list[str] = []
-    lines.append(f"## 🖼️ Visual themes closest to \"{query}\"")
-    lines.append(
-        "Here are the visual patterns most similar to your question, based on "
-        "the image cluster analysis."
-    )
+    lines.append(f"Visual themes closest to **\"{query}\"**:")
     lines.append("")
 
-    for c in clusters:
-        lines.append(f"### {c['name']}")
-        if c["description"]:
-            lines.append(c["description"])
-        if c["blip_caption"]:
-            lines.append(f"> Visual evidence: \"{c['blip_caption']}\"")
-        if c["characteristics"]:
-            lines.append(
-                "Key features: " + ", ".join(str(x) for x in c["characteristics"][:6])
-            )
-        lines.append("")
+    for c in clusters[:6]:
+        detail = ", ".join(str(x) for x in (c.get("characteristics") or [])[:4])
+        if not detail:
+            detail = c.get("blip_caption") or c.get("description") or ""
+        lines.append(f"- **{c['name']}** — {detail}")
 
     return "\n".join(lines)
 
@@ -1019,25 +1011,32 @@ def format_live_trends_answer(query: str, context: dict[str, Any]) -> str:
         lines.append(f"For {subj}, the trending look to borrow is:")
     lines.append("")
 
-    for t in scored[:6]:
+    for i, t in enumerate(scored[:5], 1):
         growth = t.get("growth_rate")
         if t.get("prior_posts", 0) == 0 and t.get("recent_posts", 0) > 0:
             growth_s = "brand new this window"
-        elif growth is None:
-            growth_s = "—"
-        else:
+        elif growth is not None:
             growth_s = f"{'+' if growth >= 0 else ''}{growth * 100:.0f}% vs prior window"
-        kw = t.get("keywords") or []
-        head = f"**{t.get('name', 'theme')}** — {growth_s}"
-        if t.get("recent_posts") is not None:
-            head += f" · {t.get('recent_posts')} recent posts"
+        else:
+            growth_s = ""
+        head = f"{i}. **{t.get('name', 'theme')}**"
+        tail = [
+            s for s in (
+                growth_s,
+                f"{t.get('recent_posts')} recent posts"
+                if t.get("recent_posts") is not None else "",
+            ) if s
+        ]
+        if tail:
+            head += " — " + " · ".join(tail)
         lines.append(head)
-        dirs = _photo_directions(kw)
+
+        dirs = _photo_directions(t.get("keywords") or [], limit=2)
         if dirs:
             lines.append("")
-            lines.append("What to do:")
+            lines.append("   What to do:")
             for d in dirs:
-                lines.append(f"- {d}")
+                lines.append(f"   - {d}")
         lines.append("")
 
     if has_subject and not any(
@@ -1082,6 +1081,7 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
             {
                 "name": c.get("name", ""),
                 "keywords": c.get("keywords", []),
+                "style_tags": c.get("style_tags", []),
                 "growth_rate": c.get("growth_rate"),
                 "emerging_score": c.get("emerging_score", 0),
                 "relevance_score": c.get("relevance_score", 0),
@@ -1112,6 +1112,7 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
                         "description": c.get("blip_caption", ""),
                         "blip_caption": c.get("blip_caption", ""),
                         "characteristics": c.get("keywords", []),
+                        "style_tags": c.get("style_tags", []),
                         "interpretation_confidence": None,
                     }
                     for i, c in enumerate(ig_chunks)
@@ -1123,6 +1124,17 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 — fall back to rule-based, never break
             pass
 
+        # Representative images for the retrieved themes (top themes as
+        # fallback when nothing cleared the retrieval threshold)
+        theme_names = [c.get("name") for c in ig_chunks if c.get("name")] or [
+            t.get("name")
+            for t in sorted(
+                ig_trends.get("themes") or [],
+                key=lambda t: t.get("emerging_score", 0),
+                reverse=True,
+            )[:4]
+        ]
+
         return {
             "query": query,
             "answer": answer,
@@ -1131,7 +1143,7 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
             "scopeReason": None,
             "scopeMethod": "instagram-data",
             "retrievedClusters": ig_retrieved,
-            "supportingImages": [],
+            "supportingImages": instagram_image_urls(theme_names),
             "totalClustersAnalyzed": len(ig_themes),
             "disclaimer": ig_trends.get("disclaimer", config.INSTAGRAM_DATA_WARNING),
             "sources": ["instagram"],
@@ -1150,7 +1162,7 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
             "scopeMethod": scope.get("method"),
             "retrievedClusters": [],
             "supportingImages": [],
-            "totalClustersAnalyzed": len(load_interpretations()),
+            "totalClustersAnalyzed": _total_clusters_safe(),
             "disclaimer": config.SYNTHETIC_DATA_WARNING,
             "sources": [],
             "mode": "faiss-only",

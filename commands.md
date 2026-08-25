@@ -64,8 +64,9 @@ Pipeline stages (incremental):
 3. CLIP image embeddings (new images only)
 4. FAISS KNN assignment to existing clusters
 5. Detect emerging micro-clusters from unassigned images
-6. Temporal trend analysis (stable cluster IDs)
-7. FAISS RAG index rebuild
+6. Photography-style tagging over all embeddings
+7. Temporal trend analysis (stable cluster IDs)
+8. FAISS RAG index rebuild
 
 Pipeline stages (baseline — `--baseline`):
 1. Fetch posts from `account.txt` via Apify
@@ -74,8 +75,9 @@ Pipeline stages (baseline — `--baseline`):
 4. UMAP dim reduction + HDBSCAN clustering
 5. Lock centroids → build cluster registry with stable UUIDs
 6. BLIP captioning of representative images
-7. Temporal trend analysis
-8. FAISS RAG index build
+7. CLIP zero-shot photography-style tagging (per-cluster execution profile)
+8. Temporal trend analysis
+9. FAISS RAG index build
 
 ### Backend API (port 8000)
 
@@ -112,6 +114,9 @@ Requires the backend to be running on `:8000`. All `/api/*` requests are proxied
 ```bash
 python -m src.rag "What cafe aesthetic is rising this week?"
 python -m src.rag "What food photography styles are trending on Instagram?"
+python -m src.rag "What street style aesthetics are trending on Instagram?"
+python -m src.rag "What editing and colour grading styles are trending in photography?"
+python -m src.rag "What makeup looks are trending on Instagram?"
 ```
 
 ### Tests
@@ -136,12 +141,28 @@ All three formats work. Then re-run `python -m src.data_collector`.
 
 ---
 
-## Switching Niches
+## Niches Currently Monitored
 
-To switch from food to fashion/beauty:
-1. Edit `account.txt` with new Instagram accounts
+`account.txt` covers four niches (~81 accounts):
+
+| Niche | Accounts (examples) |
+|-------|---------------------|
+| Food / cafe / dessert | `food52`, `tasty`, `halfbakedharvest`, `frenchpress.latteart`, `crumblcookies` |
+| Fashion / street style | `voguemagazine`, `highsnobiety`, `styledumonde`, `matildadjerf`, `tokyofashion` |
+| Photography | `natgeo`, `magnumphotos`, `jordi.koalitic`, `alan_schaller`, `moodygrams` |
+| Beauty / skincare | `hudabeauty`, `rarebeauty`, `glossier`, `ctilburymakeup`, `theordinary` |
+
+CLIP clusters by visual semantics, so niches form separate clusters — niche-specific queries retrieve only the relevant ones.
+
+---
+
+## Adding a New Niche
+
+1. Append Instagram URLs/usernames to `account.txt` (one per line, no comments)
 2. Run `python -m src.data_collector`
-3. Query: `python -m src.rag "What fashion micro-aesthetic is trending?"`
+3. Query: e.g. `python -m src.rag "What travel photography aesthetics are trending?"`
+
+To start fresh for a single niche: swap the file contents and run `python -m src.data_collector --baseline`.
 
 ---
 
@@ -165,4 +186,4 @@ All generated in `data/instagram/` and `artifacts/` (regenerable via `data_colle
 
 ---
 
-_Last updated: 2026-08-19_
+_Last updated: 2026-08-24_

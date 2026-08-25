@@ -195,6 +195,35 @@ def embed_images(df: pd.DataFrame) -> tuple[Optional[np.ndarray], pd.DataFrame]:
     return emb, aligned
 
 
+_CLIP_TEXT_CACHE: dict[str, np.ndarray] = {}
+
+
+def _clip_text_vec(prompt: str) -> Optional[np.ndarray]:
+    """L2-normalised CLIP text embedding for a prompt (cached). Same shared
+    embedding space as the stored image vectors."""
+    if prompt in _CLIP_TEXT_CACHE:
+        return _CLIP_TEXT_CACHE[prompt]
+    try:
+        import torch
+
+        from src.embeddings import load_clip
+
+        model, processor, device = load_clip()
+        with torch.no_grad():
+            inp = processor(text=[prompt], return_tensors="pt")
+            inp = {k: v.to(device) for k, v in inp.items()}
+            out = model.get_text_features(**inp)
+            if hasattr(out, "pooler_output"):
+                out = out.pooler_output
+            vec = out.detach().cpu().numpy().astype("float32").reshape(-1)
+    except Exception:  # noqa: BLE001 — caller falls back to centroid/likes
+        return None
+    norm = float(np.linalg.norm(vec))
+    vec = vec / norm if norm > 0 else vec
+    _CLIP_TEXT_CACHE[prompt] = vec
+    return vec
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Stage 4: HDBSCAN clustering
 # ──────────────────────────────────────────────────────────────────────────
@@ -241,11 +270,27 @@ def _title_keywords(text: str) -> list[str]:
     return seen[:10]
 
 
+_blip_cache: tuple | None = None
+
+
+def _style_scores_for(emb: np.ndarray):
+    """Zero-shot photography-style scores for embeddings, or None on failure."""
+    try:
+        from src.style_tags import compute_style_scores
+        return compute_style_scores(np.asarray(emb, dtype="float32"))
+    except Exception as e:  # noqa: BLE001 — style tagging must never break collection
+        print(f"[collector] style tagging skipped ({e})")
+        return None
+
+
 def _blip_caption(path: Path) -> tuple[str, float]:
+    global _blip_cache
     try:
         from PIL import Image
         from src.interpretation import caption_image, load_blip
-        model, processor, device = load_blip()
+        if _blip_cache is None:
+            _blip_cache = load_blip()
+        model, processor, device = _blip_cache
         img = Image.open(path).convert("RGB")
         caption = caption_image(model, processor, img, device=device)
         return caption, 1.0
@@ -259,6 +304,7 @@ def summarize_clusters(
     clusters: dict[int, list[int]],
     emb: np.ndarray,
     top_k_caption: int = 3,
+    style_scores=None,
 ) -> list[dict[str, Any]]:
     """Generate cluster summaries with BLIP captions and keywords.
 
@@ -266,6 +312,10 @@ def summarize_clusters(
     HDBSCAN group and caption only the top *top_k_caption* closest
     vectors. This keeps descriptions concentrated on the core visual
     style while captioning only 3 images instead of the full cluster.
+
+    ``style_scores`` (optional, from src.style_tags.compute_style_scores)
+    adds a per-cluster *photography execution* profile — how the images
+    are shot (framing, lighting, grading) as opposed to what is in them.
     """
     summaries: list[dict[str, Any]] = []
 
@@ -317,12 +367,20 @@ def summarize_clusters(
         )
         name = " ".join(cap_keywords[:3]) if cap_keywords else f"Visual theme {cid}"
 
+        # Photography execution profile (how it is shot, not what is shot)
+        if style_scores is not None:
+            from src.style_tags import aggregate_styles
+            style_tags = aggregate_styles(style_scores, indices=indices)
+        else:
+            style_tags = []
+
         summaries.append({
             "cluster_id": int(cid),
             "name": name,
             "keywords": keywords,
             "blip_caption": combined_caption,
             "blip_confidence": round(1.0 if captions else 0.0, 4),
+            "style_tags": style_tags,
             "n_posts": len(indices),
             "representative_post_id": best["post_id"],
             "representative_author": best.get("author", ""),
@@ -555,6 +613,13 @@ def build_rag_index(
 
         examples = " | ".join(s.get("example_captions", [])[:3])
 
+        # Photography execution profile (how it is shot)
+        style_tags = s.get("style_tags", [])
+        style_str = ""
+        if style_tags:
+            from src.style_tags import format_style_tags
+            style_str = f"Shot like: {format_style_tags(style_tags)}. "
+
         # Engagement summary
         avg_l = t.get("avg_likes", 0)
         avg_c = t.get("avg_comments", 0)
@@ -580,6 +645,7 @@ def build_rag_index(
             f"Instagram visual trend: \"{s['name']}\". "
             f"Keywords: {', '.join(s['keywords'][:6])}. "
             f"BLIP caption: \"{s['blip_caption']}\". "
+            f"{style_str}"
             f"Growth: {growth_s}. "
             f"Posts: {s['n_posts']} total, {t.get('recent_posts', 0)} recent. "
             f"Engagement: {eng_str}. "
@@ -595,6 +661,7 @@ def build_rag_index(
             "text": text,
             "name": s["name"],
             "keywords": s["keywords"],
+            "style_tags": style_tags,
             "growth_rate": growth,
             "emerging_score": t.get("emerging_score", 0),
             "avg_likes": t.get("avg_likes", 0),
@@ -643,6 +710,7 @@ def save_trends_json(
             "keywords": s["keywords"],
             "blip_caption": s["blip_caption"],
             "blip_confidence": s["blip_confidence"],
+            "style_tags": s.get("style_tags", []),
             "n_posts": s["n_posts"],
             "recent_posts": t.get("recent_posts", 0),
             "prior_posts": t.get("prior_posts", 0),
@@ -718,6 +786,10 @@ def _run_baseline_pipeline(days: int, registry) -> dict[str, Any]:
         return {"n_posts": len(df), "error": "No images could be embedded"}
     df = aligned
 
+    # Stage 3b: Photography style tagging (CLIP zero-shot, no extra passes)
+    print("\n--- Stage 3b: Photography style tagging ---")
+    style_scores = _style_scores_for(emb)
+
     # Stage 4: HDBSCAN clustering
     print("\n--- Stage 4: HDBSCAN clustering ---")
     labels, clusters = cluster_posts(emb, df)
@@ -741,7 +813,7 @@ def _run_baseline_pipeline(days: int, registry) -> dict[str, Any]:
 
     # Stage 5: Summarize
     print("\n--- Stage 5: BLIP captioning + summarization ---")
-    summaries = summarize_clusters(df, labels, clusters, emb)
+    summaries = summarize_clusters(df, labels, clusters, emb, style_scores=style_scores)
 
     # Stage 6: Temporal trends
     print("\n--- Stage 6: Temporal trend analysis ---")
@@ -821,11 +893,26 @@ def _run_incremental_pipeline(days: int, registry) -> dict[str, Any]:
     print(f"[collector] downloaded {len(saved)}/{n_new} new images")
 
     # Stage 3: Embed new images
+    # Save old embeddings + metadata BEFORE embed_images overwrites them
+    old_emb_path = config.INSTAGRAM_EMBEDDINGS_PATH
+    old_emb = np.load(old_emb_path) if old_emb_path.exists() else None
+    old_embed_meta_path = config.INSTAGRAM_DIR / "embed_meta.parquet"
+    old_embed_meta = pd.read_parquet(old_embed_meta_path) if old_embed_meta_path.exists() else pd.DataFrame()
+
     print("\n--- Stage 3: CLIP image embeddings ---")
     new_emb, aligned_new = embed_images(genuinely_new)
     if new_emb is None:
         print("[collector] no new images could be embedded")
         return _rebuild_trends_from_registry(registry, combined)
+
+    # embed_images overwrote the embeddings file with only the new batch —
+    # restore the full history immediately so a later-stage crash cannot
+    # lose the old per-image embeddings.
+    if old_emb is not None:
+        np.save(old_emb_path, np.vstack([old_emb, new_emb]))
+        pd.concat([old_embed_meta, aligned_new], ignore_index=True).to_parquet(
+            old_embed_meta_path, index=False
+        )
 
     # Stage 4: KNN assignment to existing clusters
     print("\n--- Stage 4: KNN assignment to existing clusters ---")
@@ -862,12 +949,21 @@ def _run_incremental_pipeline(days: int, registry) -> dict[str, Any]:
     # Stage 5: Rebuild summaries from all assigned posts
     print("\n--- Stage 5: Rebuilding cluster summaries ---")
     # Merge new and old embeddings for full trend computation
-    old_emb_path = config.INSTAGRAM_EMBEDDINGS_PATH
-    if old_emb_path.exists():
-        old_emb = np.load(old_emb_path)
+    if old_emb is not None:
         all_emb = np.vstack([old_emb, new_emb])
     else:
         all_emb = new_emb
+
+    # Build aligned metadata matching all_emb (old embed_meta + new aligned)
+    if not old_embed_meta.empty:
+        all_meta = pd.concat([old_embed_meta, aligned_new], ignore_index=True)
+    else:
+        all_meta = aligned_new.copy()
+
+    # Sanity check: embeddings and metadata must be aligned
+    assert len(all_emb) == len(all_meta), (
+        f"Alignment mismatch: all_emb={len(all_emb)} but all_meta={len(all_meta)}"
+    )
 
     # Assign cluster labels to ALL posts using the registry
     full_labels = _assign_all_to_registry(registry, all_emb)
@@ -878,22 +974,34 @@ def _run_incremental_pipeline(days: int, registry) -> dict[str, Any]:
         if label >= 0:
             clusters_dict.setdefault(label, []).append(i)
 
-    # Stage 6: Temporal trends
+    # Photography style profiles over the full embedding matrix
+    print("\n--- Stage 5b: Photography style tagging ---")
+    style_profiles = {}
+    style_scores = _style_scores_for(all_emb)
+    if style_scores is not None:
+        from src.style_tags import aggregate_styles
+        for cid, indices in clusters_dict.items():
+            style_profiles[cid] = aggregate_styles(style_scores, indices=indices)
+
+    # Stage 6: Temporal trends — use all_meta (aligned with all_emb)
     print("\n--- Stage 6: Temporal trend analysis ---")
-    temporal = compute_temporal_trends(combined, full_labels, clusters_dict)
+    temporal = compute_temporal_trends(all_meta, full_labels, clusters_dict)
 
     # Stage 6b: Hashtag trends
     print("\n--- Stage 6b: Hashtag trend analysis ---")
-    hashtag_trends = compute_hashtag_trends(combined)
+    hashtag_trends = compute_hashtag_trends(all_meta)
 
     # Stage 7: RAG index
     print("\n--- Stage 7: Building RAG index ---")
-    summaries = _build_summaries_from_registry(registry, combined, full_labels, clusters_dict)
-    build_rag_index(summaries, temporal, combined)
+    summaries = _build_summaries_from_registry(
+        registry, all_meta, full_labels, clusters_dict,
+        style_profiles=style_profiles, emb=all_emb,
+    )
+    build_rag_index(summaries, temporal, all_meta)
 
     # Stage 8: Save
     print("\n--- Stage 8: Saving artifacts ---")
-    trends = save_trends_json(summaries, temporal, combined, full_labels, hashtag_trends)
+    trends = save_trends_json(summaries, temporal, all_meta, full_labels, hashtag_trends)
 
     print(f"\n{'='*60}")
     print(f"  Incremental run complete!")
@@ -946,16 +1054,42 @@ def _assign_all_to_registry(registry, all_emb: np.ndarray) -> np.ndarray:
     return labels
 
 
+# Curated concept vocabulary for zero-shot visual theme naming. Cluster names
+# derived from caption frequency are often caption noise ("very difficult
+# focusing"); scoring member IMAGES against these concepts yields a name that
+# describes what the photos actually show.
+_VISUAL_CONCEPTS = [
+    "fried chicken", "pizza", "burger", "sushi", "ramen noodle soup",
+    "fresh salad bowl", "layered cake dessert", "donuts",
+    "bakery pastries and bread", "pancakes with syrup",
+    "latte art in a coffee cup", "barista pouring espresso coffee",
+    "cocktails and drinks", "smoothie bowl with fruit",
+    "tacos mexican street food", "ice cream", "grilled steak barbecue",
+    "seafood platter", "rice and curry dish", "sandwich brunch plate",
+    "character birthday cake", "people gathering at a cafe event",
+    "outdoor running fitness event", "cozy home cooked meal",
+    "hands preparing food in a kitchen",
+]
+
+
 def _build_summaries_from_registry(
     registry, df: pd.DataFrame, labels: np.ndarray,
     clusters: dict[int, list[int]],
+    style_profiles: Optional[dict[int, list[dict[str, Any]]]] = None,
+    emb: Optional[np.ndarray] = None,
 ) -> list[dict[str, Any]]:
-    """Build cluster summaries using registry metadata."""
-    import faiss
+    """Build cluster summaries using registry metadata.
 
-    _, stable_ids = registry.load_centroid_index()
+    ``style_profiles`` maps cluster int-label → ranked style tags (from
+    src.style_tags) computed over the current embedding matrix.
+    ``emb`` (aligned with ``df``/``labels``) enables centroid-based
+    representative selection — the member that LOOKS most like the theme,
+    instead of the highest-liked outlier.
+    """
+    index, stable_ids = registry.load_centroid_index()
     int_to_sid = {i: sid for i, sid in enumerate(stable_ids)}
 
+    seen_names: set[str] = set()
     summaries = []
     for cid_int, indices in sorted(clusters.items()):
         sid = int_to_sid.get(cid_int, f"cls_{cid_int}")
@@ -971,33 +1105,82 @@ def _build_summaries_from_registry(
         else:
             keywords = rec.get("keywords", [])
 
-        # Representative: most recent post
+        # Representative + display name from what the images actually show:
+        # zero-shot CLIP classification of member images against
+        # _VISUAL_CONCEPTS. The winning concept becomes the theme name and
+        # the text anchor for representative selection, so names, answers,
+        # and displayed pictures all agree.
+        vis_name: Optional[str] = None
+        combined: Optional[np.ndarray] = None
+        if emb is not None and n_posts > 0:
+            member_mat = emb[np.asarray(indices)].astype("float32")
+
+            scored_concepts: list[tuple[str, np.ndarray]] = []
+            for concept in _VISUAL_CONCEPTS:
+                cv = _clip_text_vec("a photo of " + concept)
+                if cv is not None:
+                    scored_concepts.append((concept, member_mat @ cv))
+            if scored_concepts:
+                mean_scores = np.array(
+                    [float(s.mean()) for _, s in scored_concepts]
+                )
+                best_ci = int(np.argmax(mean_scores))
+                vis_name, concept_sims = scored_concepts[best_ci]
+
+            if index is not None and stable_ids:
+                try:
+                    centroid = index.reconstruct(int(cid_int)).reshape(-1).astype("float32")
+                    centroid_sims = member_mat @ centroid
+                    combined = (
+                        0.35 * centroid_sims + 0.65 * concept_sims
+                        if vis_name is not None else centroid_sims
+                    )
+                except Exception:  # noqa: BLE001 — concept sims alone suffice
+                    combined = concept_sims if vis_name is not None else None
+
+        rep_id, rep_author = "", ""
         if n_posts > 0:
-            if "likes" in members.columns and members["likes"].sum() > 0:
-                best_idx = members["likes"].idxmax()
+            best = None
+            if combined is not None:
+                order = list(np.argsort(-combined)[: min(5, len(indices))])
+                likes_vals = (
+                    [float(x) for x in members["likes"].tolist()]
+                    if "likes" in members.columns else [0.0] * len(members)
+                )
+                if sum(likes_vals) > 0:
+                    best_pos = max(order, key=lambda p: likes_vals[p])
+                else:
+                    best_pos = order[0]
+                best = members.iloc[best_pos]
+            elif "likes" in members.columns and members["likes"].sum() > 0:
+                best = members.loc[members["likes"].idxmax()]
             else:
-                best_idx = members["timestamp"].idxmax()
-            best = members.loc[best_idx]
-            rep_id = best.get("post_id", "")
-            rep_author = best.get("author", "")
+                best = members.loc[members["timestamp"].idxmax()]
+            rep_id = str(best.get("post_id", ""))
+            rep_author = str(best.get("author", ""))
             examples = [
                 str(c) for c in members["caption"].fillna("").head(5).tolist() if c
             ]
-        else:
-            rep_id = ""
-            rep_author = ""
-            examples = []
 
         # BLIP caption from registry or skip
         caption = rec.get("blip_caption", "")
         conf = 0.0
 
+        display_name = (
+            vis_name.capitalize() if vis_name else rec.get("name", f"Theme {sid}")
+        )
+        base_name, n_variant = display_name, 2
+        while display_name in seen_names:
+            display_name = f"{base_name} {n_variant}"
+            n_variant += 1
+        seen_names.add(display_name)
         summaries.append({
             "cluster_id": cid_int,
-            "name": rec.get("name", f"Theme {sid}"),
+            "name": display_name,
             "keywords": keywords or rec.get("keywords", []),
             "blip_caption": caption,
             "blip_confidence": conf,
+            "style_tags": (style_profiles or {}).get(cid_int, []),
             "n_posts": n_posts,
             "representative_post_id": rep_id,
             "representative_author": rep_author,
@@ -1024,7 +1207,16 @@ def _rebuild_trends_from_registry(registry, df: pd.DataFrame) -> dict[str, Any]:
             clusters_dict.setdefault(label, []).append(i)
 
     temporal = compute_temporal_trends(df, full_labels, clusters_dict)
-    summaries = _build_summaries_from_registry(registry, df, full_labels, clusters_dict)
+    style_scores = _style_scores_for(emb)
+    style_profiles = {}
+    if style_scores is not None:
+        from src.style_tags import aggregate_styles
+        for cid, indices in clusters_dict.items():
+            style_profiles[cid] = aggregate_styles(style_scores, indices=indices)
+    summaries = _build_summaries_from_registry(
+        registry, df, full_labels, clusters_dict,
+        style_profiles=style_profiles, emb=emb,
+    )
     build_rag_index(summaries, temporal, df)
     trends = save_trends_json(summaries, temporal, df, full_labels)
 
