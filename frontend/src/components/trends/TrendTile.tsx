@@ -31,12 +31,12 @@ export default function TrendTile({ item }: Props) {
       >
         <p className="text-xs uppercase tracking-[0.2em] text-white/70">
           {item.category}
+          {item.author ? ` · @${item.author}` : ""}
         </p>
-        <p className="font-display text-lg font-semibold text-white">
+        <p className="font-display text-lg font-semibold leading-snug text-white">
           {item.title}
         </p>
       </div>
-      {/* static caption on touch devices (no hover) */}
       <span className="sr-only">{`${item.category} — ${item.title}`}</span>
       <span
         aria-hidden

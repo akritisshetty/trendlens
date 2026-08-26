@@ -1,7 +1,7 @@
 import PageTransition from "../components/navigation/PageTransition";
 import Hero from "../components/hero/Hero";
 import TrendsSection from "../components/trends/TrendsSection";
-import InterestSelector from "../components/interests/InterestSelector";
+import LiveThemes from "../components/trends/LiveThemes";
 import ThoughtSection from "../components/thoughts/ThoughtSection";
 import FeedbackSection from "../components/feedback/FeedbackSection";
 
@@ -10,7 +10,7 @@ export default function Home() {
     <PageTransition>
       <Hero />
       <TrendsSection />
-      <InterestSelector />
+      <LiveThemes />
       <ThoughtSection />
       <FeedbackSection />
     </PageTransition>

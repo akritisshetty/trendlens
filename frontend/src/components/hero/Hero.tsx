@@ -4,8 +4,6 @@ import { ArrowDown } from "lucide-react";
 import KineticChar from "./KineticChar";
 
 const HEADLINE = ["TREND", "LENS"];
-const DIGITS = "123456789".split("");
-const GLYPHS = ["*", "#", "&", "@", "%", "?", "!"].concat(DIGITS);
 
 export default function Hero() {
   const ref = useRef<HTMLElement>(null);
@@ -16,7 +14,6 @@ export default function Hero() {
   });
   const drift = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : -120]);
   const fade = useTransform(scrollYProgress, [0, 0.8], [1, reduce ? 1 : 0.15]);
-  const glyphDrift = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : 160]);
 
   return (
     <section
@@ -24,33 +21,6 @@ export default function Hero() {
       aria-label="TrendLens intro"
       className="relative flex min-h-svh flex-col justify-center overflow-hidden px-5 md:px-10"
     >
-      {/* scattered ambient glyphs behind the headline */}
-      <motion.div
-        aria-hidden
-        style={{ y: glyphDrift }}
-        className="pointer-events-none absolute inset-0 select-none font-display text-ink/10"
-      >
-        {GLYPHS.map((g, i) => {
-          // deterministic pseudo-random placement
-          const left = (i * 137 + 40) % 96;
-          const top = (i * 53 + 12) % 88;
-          const size = 2 + ((i * 7) % 4);
-          return (
-            <span
-              key={`${g}-${i}`}
-              className="absolute"
-              style={{
-                left: `${left}%`,
-                top: `${top}%`,
-                fontSize: `${size}rem`,
-              }}
-            >
-              {g}
-            </span>
-          );
-        })}
-      </motion.div>
-
       <motion.div style={{ y: drift, opacity: fade }} className="relative">
         {/* kicker */}
         <motion.p
@@ -73,9 +43,7 @@ export default function Hero() {
                   floatDelay={wi * 0.3 + ci * 0.15}
                   floatDuration={4 + ((ci * 3) % 4)}
                   className={`text-[clamp(4.5rem,19vw,17rem)] ${
-                    (wi * word.length + ci) % 6 === 5
-                      ? "text-accent"
-                      : "text-ink"
+                    wi === 1 && ci === 1 ? "text-accent" : "text-ink"
                   }`}
                 />
               ))}

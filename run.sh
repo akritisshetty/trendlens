@@ -40,20 +40,39 @@ ok()    { printf "${GREEN}[trendlens]${NC} %s\n" "$*"; }
 warn()  { printf "${YELLOW}[trendlens]${NC} %s\n" "$*"; }
 die()   { printf "${RED}[trendlens]${NC} %s\n" "$*" >&2; exit 1; }
 
-# ── Preflight checks ────────────────────────────────────────────────────────
-[ -f venv/bin/activate ]          || die "Python venv not found. Run:  python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
-[ -f frontend/node_modules/.package-lock.json ] || die "Frontend deps not installed. Run:  cd frontend && npm install"
-[ -f .env ]                       || { warn ".env not found — copying from .env.example"; cp .env.example .env; }
+# ── Preflight checks (auto-install anything missing) ────────────────────────
+if [ ! -f venv/bin/activate ]; then
+  warn "Python venv not found — creating one ..."
+  python3 -m venv venv || die "Could not create venv. Install python3-venv and retry."
+fi
 
 source venv/bin/activate
 
-# ── Step 1: Run the data pipeline ────────────────────────────────────────────
+if ! python -c "import fastcluster, faiss, transformers" >/dev/null 2>&1; then
+  warn "Python dependencies missing — installing requirements.txt (this can take a few minutes) ..."
+  pip install -q --upgrade pip
+  pip install -q -r requirements.txt || die "pip install failed — see output above."
+fi
+
+if [ ! -d frontend/node_modules ]; then
+  warn "Frontend deps not found — running npm install ..."
+  (cd frontend && npm install) || die "npm install failed — see output above."
+fi
+
+[ -f .env ] || { warn ".env not found — copying from .env.example"; cp .env.example .env 2>/dev/null \
+  || warn "No .env or .env.example — Instagram scraping will fail until APIFY_API_TOKEN is set."; }
+
+# ── Step 1: Run the data pipeline (non-fatal — existing data still works) ───
 if [ -n "$BASELINE_FLAG" ]; then
   info "Running data BASELINE (${DAYS}-day window) — full re-cluster ..."
-  python -m src.data_collector --days "$DAYS" --baseline
+  if ! python -m src.data_collector --days "$DAYS" --baseline; then
+    warn "Pipeline failed (Apify quota/payment or network?) — continuing with previously collected data."
+  fi
 else
   info "Running data pipeline INCREMENTAL (${DAYS}-day window) ..."
-  python -m src.data_collector --days "$DAYS"
+  if ! python -m src.data_collector --days "$DAYS"; then
+    warn "Pipeline failed (Apify quota/payment or network?) — continuing with previously collected data."
+  fi
 fi
 echo
 

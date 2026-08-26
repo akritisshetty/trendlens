@@ -1,3 +1,5 @@
+import type { LiveTile } from "../services/liveTiles";
+
 export type TrendItem = {
   id: string;
   title: string;
@@ -6,6 +8,7 @@ export type TrendItem = {
   width: number;
   height: number;
   tilt: number;
+  author?: string;
 };
 
 export type TrendRow = {
@@ -73,3 +76,45 @@ export const trendRows: TrendRow[] = [
     ],
   },
 ];
+
+/* ── Real Instagram tiles → marquee rows ──────────────────────── */
+
+const TILE_SIZES: Array<[number, number, number]> = [
+  // [width, height, tilt]
+  [300, 380, -1.2],
+  [420, 320, 0.8],
+  [270, 350, 1.5],
+  [360, 440, -0.6],
+  [310, 310, 1],
+  [340, 400, -1],
+  [290, 410, 0.9],
+  [400, 330, -1.4],
+];
+
+/** Build marquee rows from real backend tiles (round-robin over 3 rows). */
+export function buildRowsFromLiveTiles(tiles: LiveTile[]): TrendRow[] {
+  const rowsMeta = [
+    { label: "live · row one", direction: "ltr" as const, duration: 70 },
+    { label: "live · row two", direction: "rtl" as const, duration: 85 },
+    { label: "live · row three", direction: "ltr" as const, duration: 95 },
+  ];
+
+  return rowsMeta.map((meta, rowIndex) => ({
+    ...meta,
+    items: tiles
+      .filter((_, i) => i % rowsMeta.length === rowIndex)
+      .map((tile, i) => {
+        const [w, h, tilt] = TILE_SIZES[(i + rowIndex) % TILE_SIZES.length];
+        return {
+          id: tile.id,
+          title: tile.title,
+          category: tile.category,
+          src: tile.url,
+          width: w,
+          height: h,
+          tilt,
+          author: tile.author,
+        };
+      }),
+  }));
+}

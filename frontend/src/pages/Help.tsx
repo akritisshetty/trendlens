@@ -15,8 +15,8 @@ const FAQS: Faq[] = [
     a: "Every image gets turned into a vector of visual meaning. Images that sit close together form a cluster, and we track each cluster's growth day over day. Rising clusters with small bases are where new trends hide. Hover any tile in the trends wall to see what it is.",
   },
   {
-    q: "What does picking interests actually do?",
-    a: "It tunes which clusters surface first when you browse and chat. Pick Food and Photography and the lens leans that way. You can change them whenever — nothing is locked in.",
+    q: "Where do the rising themes come from?",
+    a: "Every post we fetch is clustered by what it looks like, and each theme's growth is measured against the previous window. The 'Rising right now' list on the home page shows exactly what the pipeline currently sees — no hand-picking.",
   },
   {
     q: "How do I use the chat?",

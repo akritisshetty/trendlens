@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -203,6 +204,205 @@ def handle_image(path: str):
     return resolved.read_bytes(), ctype
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Auth — SQLite-backed accounts (stdlib only)
+#   users(id, email UNIQUE, password_hash, salt, name, created_at)
+#   sessions(token, email, created_at)
+# Passwords: PBKDF2-HMAC-SHA256, 200k iterations, per-user random salt.
+# ──────────────────────────────────────────────────────────────────────────
+
+_PBKDF2_ITERATIONS = 200_000
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _auth_conn():
+    import sqlite3
+
+    conn = sqlite3.connect(config.AUTH_DB_PATH)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS users (
+               id            INTEGER PRIMARY KEY AUTOINCREMENT,
+               email         TEXT    UNIQUE NOT NULL,
+               password_hash TEXT    NOT NULL,
+               salt          TEXT    NOT NULL,
+               name          TEXT    NOT NULL DEFAULT '',
+               created_at    TEXT    NOT NULL
+           )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS sessions (
+               token      TEXT PRIMARY KEY,
+               email      TEXT NOT NULL,
+               created_at TEXT NOT NULL
+           )"""
+    )
+    conn.commit()
+    return conn
+
+
+def _hash_password(password: str, salt_hex: str) -> str:
+    import hashlib
+
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex),
+        _PBKDF2_ITERATIONS,
+    ).hex()
+
+
+def _issue_session(email: str) -> str:
+    import secrets as _secrets
+    from datetime import datetime, timezone
+
+    token = _secrets.token_urlsafe(32)
+    with _auth_conn() as conn:
+        conn.execute(
+            "INSERT INTO sessions (token, email, created_at) VALUES (?, ?, ?)",
+            (token, email, datetime.now(timezone.utc).isoformat()),
+        )
+    return token
+
+
+def handle_auth_signup(payload: dict) -> dict[str, Any]:
+    import secrets as _secrets
+    from datetime import datetime, timezone
+
+    email = str(payload.get("email") or "").strip().lower()
+    password = str(payload.get("password") or "")
+    name = str(payload.get("name") or "").strip()[:80]
+
+    if not _EMAIL_RE.match(email):
+        return {"status": "error", "error": "Enter a valid email address."}
+    if len(password) < 6:
+        return {"status": "error", "error": "Password must be at least 6 characters."}
+
+    salt = _secrets.token_bytes(16).hex()
+    pw_hash = _hash_password(password, salt)
+    now = datetime.now(timezone.utc).isoformat()
+
+    try:
+        with _auth_conn() as conn:
+            conn.execute(
+                "INSERT INTO users (email, password_hash, salt, name, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (email, pw_hash, salt, name, now),
+            )
+    except Exception:  # noqa: BLE001 — unique constraint on email
+        return {
+            "status": "exists",
+            "error": "That email is already registered — log in instead.",
+        }
+
+    return {
+        "status": "ok",
+        "user": {"email": email, "name": name},
+        "token": _issue_session(email),
+    }
+
+
+def handle_auth_login(payload: dict) -> dict[str, Any]:
+    email = str(payload.get("email") or "").strip().lower()
+    password = str(payload.get("password") or "")
+
+    if not _EMAIL_RE.match(email) or not password:
+        return {"status": "error", "error": "Email and password are required."}
+
+    with _auth_conn() as conn:
+        row = conn.execute(
+            "SELECT password_hash, salt, name FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+
+    if row is None:
+        return {"status": "no-user", "error": "No account with that email — sign up first."}
+    stored_hash, salt, name = row
+    if _hash_password(password, salt) != stored_hash:
+        return {"status": "bad-password", "error": "Wrong password for that account."}
+
+    return {
+        "status": "ok",
+        "user": {"email": email, "name": name},
+        "token": _issue_session(email),
+    }
+
+
+def handle_auth_logout(payload: dict) -> dict[str, Any]:
+    token = str(payload.get("token") or "")
+    if token:
+        with _auth_conn() as conn:
+            conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    return {"status": "ok"}
+
+
+def handle_feedback(payload: dict) -> dict[str, Any]:
+    """
+    Email the user's thought/feedback to the project inbox.
+
+    The recipient address lives ONLY on the server (.env) — it is never
+    exposed to the frontend. Sending uses Gmail SMTP with an app password:
+
+      TRENDLENS_FEEDBACK_EMAIL     recipient (default: majorproject.2627@gmail.com)
+      TRENDLENS_EMAIL_USER         Gmail account used to SEND
+      TRENDLENS_EMAIL_APP_PASSWORD Gmail app password (needs 2FA enabled)
+    """
+    import os
+    import re
+    import smtplib
+    from datetime import datetime, timezone
+    from email.message import EmailMessage
+
+    message = str(payload.get("message") or "").strip()
+    contact = str(payload.get("contact") or "").strip()
+    source = str(payload.get("source") or "website").strip()
+
+    if not message:
+        return {"status": "error", "error": "Empty message — nothing to send."}
+    if len(message) > 5000:
+        message = message[:5000]
+    # Reply-To must look like an email if provided; otherwise drop it.
+    if contact and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", contact):
+        contact = ""
+
+    user = os.environ.get("TRENDLENS_EMAIL_USER", "").strip()
+    password = os.environ.get("TRENDLENS_EMAIL_APP_PASSWORD", "").strip()
+    recipient = (
+        os.environ.get("TRENDLENS_FEEDBACK_EMAIL", "").strip()
+        or "majorproject.2627@gmail.com"
+    )
+    if not user or not password:
+        return {
+            "status": "email-not-configured",
+            "error": "Server cannot send mail yet — SMTP credentials are not set.",
+        }
+
+    try:
+        msg = EmailMessage()
+        msg["From"] = user
+        msg["To"] = recipient
+        if contact:
+            msg["Reply-To"] = contact
+        msg["Subject"] = f"TrendLens feedback — {source}"
+        msg.set_content(
+            f"{message}\n\n"
+            f"─────\n"
+            f"Sent from the TrendLens {source} form\n"
+            f"Reply-to: {contact or '(not provided)'}\n"
+            f"Time: {datetime.now(timezone.utc).isoformat()}\n"
+        )
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
+            smtp.login(user, password)
+            smtp.send_message(msg)
+    except smtplib.SMTPAuthenticationError:
+        return {
+            "status": "auth-failed",
+            "error": "Mail server rejected the credentials — check the app password.",
+        }
+    except Exception as e:  # noqa: BLE001 — never leak stack traces to clients
+        return {"status": "send-failed", "error": f"Could not send right now ({e})."}
+
+    return {"status": "sent"}
+
+
 def handle_predict(payload: dict) -> dict[str, Any]:
     """
     Honest demo: no prediction model exists yet. Returns the observed
@@ -263,6 +463,134 @@ def handle_instagram_image(name: str) -> tuple[bytes | None, str | int]:
         return None, 404
     ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
     return path.read_bytes(), ctype
+
+
+def handle_instagram_tiles(limit: int = 24) -> dict[str, Any]:
+    """
+    Tiles for the frontend trend wall: real downloaded Instagram images,
+    labelled ONLY from their own post metadata (Apify caption + author +
+    account niche). Never labelled with cluster/theme interpretations —
+    those describe clusters, not individual images.
+    """
+    img_dir = config.INSTAGRAM_IMAGES_DIR
+    if not img_dir.is_dir():
+        return {"tiles": []}
+
+    meta = _load_post_meta()
+
+    exts = {".jpg", ".jpeg", ".png", ".webp"}
+    files = sorted(
+        p for p in img_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in exts
+    )
+
+    tiles: list[dict[str, Any]] = []
+    for path in files[:limit]:
+        info = meta.get(path.stem) or {}
+        caption_title = _caption_title(info.get("caption"))
+        author = str(info.get("author") or "").strip()
+        tiles.append({
+            "id": path.stem,
+            # honest label: what THIS post actually says it is
+            "title": caption_title or "Post from the live feed",
+            "category": _niche_for(author),
+            "author": author,
+            "url": f"/api/instagram-images?name={path.name}",
+        })
+    return {"tiles": tiles}
+
+
+# ── post metadata cache for tiles ────────────────────────────────────────
+_POST_META_CACHE: Optional[dict[str, dict[str, str]]] = None
+
+
+def _load_post_meta() -> dict[str, dict[str, str]]:
+    """post_id -> {caption, author} from the collected Apify data."""
+    global _POST_META_CACHE
+    if _POST_META_CACHE is not None:
+        return _POST_META_CACHE
+    meta: dict[str, dict[str, str]] = {}
+    try:
+        import pandas as pd
+
+        df = pd.read_parquet(
+            config.PROCESSED_DIR.parent / "instagram" / "all_posts.parquet",
+            columns=["post_id", "caption", "author"],
+        )
+        for row in df.itertuples(index=False):
+            meta[str(row.post_id)] = {
+                "caption": str(row.caption or ""),
+                "author": str(row.author or ""),
+            }
+    except Exception:  # noqa: BLE001 — tiles degrade to generic labels
+        meta = {}
+    _POST_META_CACHE = meta
+    return meta
+
+
+def _caption_title(caption: str, limit: int = 52) -> Optional[str]:
+    """Short honest headline from the post's own caption."""
+    import re
+
+    text = re.sub(r"\s+", " ", caption or "").strip()
+    text = re.sub(r"#\w+", "", text)          # drop hashtags
+    text = re.sub(r"@\w+", "", text)          # drop mentions
+    text = text.strip(" \n.#@-–—|*")
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    if not text:
+        return None
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0].rstrip(" ,.;:-–—") + "…"
+    return text
+
+
+_ACCOUNT_NICHES = {
+    # coffee
+    "baristamagazine": "Coffee", "sprudge": "Coffee",
+    "tannercolsoncoffee": "Coffee", "baristadaz": "Coffee",
+    "barista_jennyeah": "Coffee", "frenchpress.latteart": "Coffee",
+    "latteartshow": "Coffee", "coffee": "Coffee",
+    "jwc.coffeeacademy": "Coffee", "dnacoffee_improvementhub": "Coffee",
+    # desserts / baking
+    "chelsweets": "Desserts", "milkbarstore": "Desserts",
+    "dominiqueansel": "Desserts", "thesweetimpact": "Desserts",
+    "crumblcookies": "Desserts", "tartinebaker": "Baking",
+    "theperfectloaf": "Baking", "halfbakedharvest": "Baking",
+    "flatlays": "Food styling",
+    # fashion
+    "voguemagazine": "Fashion", "voguerunway": "Fashion",
+    "highsnobiety": "Fashion", "styledumonde": "Fashion",
+    "matildadjerf": "Fashion", "tokyofashion": "Fashion",
+    # photography
+    "natgeo": "Photography", "magnumphotos": "Photography",
+    "jordi.koalitic": "Photography", "alan_schaller": "Photography",
+    "moodygrams": "Photography",
+    # beauty
+    "hudabeauty": "Beauty", "rarebeauty": "Beauty",
+    "glossier": "Beauty", "ctilburymakeup": "Beauty",
+    "theordinary": "Skincare",
+}
+
+_NICHE_KEYWORDS = [
+    ("coffee", "Coffee"), ("barista", "Coffee"), ("latte", "Coffee"),
+    ("sweet", "Desserts"), ("bake", "Baking"), ("cake", "Desserts"),
+    ("dessert", "Desserts"), ("cookie", "Desserts"),
+    ("vogue", "Fashion"), ("fashion", "Fashion"), ("style", "Fashion"),
+    ("wear", "Fashion"), ("outfit", "Fashion"),
+    ("photo", "Photography"), ("lens", "Photography"), ("shutter", "Photography"),
+    ("beauty", "Beauty"), ("makeup", "Beauty"), ("skin", "Skincare"),
+]
+
+
+def _niche_for(author: str) -> str:
+    """Category from the ACCOUNT a post came from (never guessed from pixels)."""
+    a = (author or "").lower().strip()
+    if a in _ACCOUNT_NICHES:
+        return _ACCOUNT_NICHES[a]
+    for kw, niche in _NICHE_KEYWORDS:
+        if kw in a:
+            return niche
+    return "Food" if a else "Instagram"
 
 
 def handle_live_trends() -> dict[str, Any]:
@@ -359,6 +687,9 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if self.path.startswith("/api/instagram-images"):
                 self._serve_instagram_image(self.path)
+            elif self.path.startswith("/api/instagram-tiles"):
+                body, code = _json(handle_instagram_tiles())
+                self._send(code, body)
             elif self.path.startswith("/api/instagram-trends"):
                 body, code = _json(handle_instagram_trends())
                 self._send(code, body)
@@ -389,6 +720,14 @@ class _Handler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if self.path.startswith("/api/rag-query"):
                 body, code = _json(handle_rag_query(payload))
+            elif self.path.startswith("/api/auth/signup"):
+                body, code = _json(handle_auth_signup(payload))
+            elif self.path.startswith("/api/auth/login"):
+                body, code = _json(handle_auth_login(payload))
+            elif self.path.startswith("/api/auth/logout"):
+                body, code = _json(handle_auth_logout(payload))
+            elif self.path.startswith("/api/feedback"):
+                body, code = _json(handle_feedback(payload))
             elif self.path.startswith("/api/predict-popularity"):
                 body, code = _json(handle_predict(payload))
             else:

@@ -63,6 +63,9 @@ PROCESSED_DIR = DATA_DIR / "processed"
 EMBEDDINGS_DIR = DATA_DIR / "embeddings"
 METADATA_DIR = DATA_DIR / "metadata"
 
+# User accounts (login) — SQLite, created on first use
+AUTH_DB_PATH = DATA_DIR / "users.db"
+
 ARTIFACTS_DIR = ROOT / "artifacts"
 CLUSTER_MODELS_DIR = ARTIFACTS_DIR / "cluster_models"
 CLUSTER_METADATA_DIR = ARTIFACTS_DIR / "cluster_metadata"

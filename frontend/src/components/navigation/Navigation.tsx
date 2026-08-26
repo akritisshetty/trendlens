@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Menu, X, Asterisk } from "lucide-react";
+import { useBackendHealth } from "../../hooks/useBackendHealth";
+import { useAuthUser } from "../../lib/auth";
 
 const LINKS = [
   { to: "/", label: "Home" },
@@ -14,6 +16,8 @@ export default function Navigation() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const reduce = useReducedMotion();
+  const health = useBackendHealth();
+  const user = useAuthUser();
 
   return (
     <>
@@ -68,8 +72,29 @@ export default function Navigation() {
                 to="/login"
                 className="ml-2 block rounded-full border border-ink px-4 py-2 text-sm font-medium transition-colors hover:bg-ink hover:text-paper"
               >
-                Log in
+                {user ? user.email.split("@")[0] : "Log in"}
               </NavLink>
+            </li>
+            <li
+              aria-live="polite"
+              title={
+                health?.live
+                  ? `Pipeline live — ${health.dataset ?? ""}`
+                  : "Backend offline — showing demo signals"
+              }
+              className="ml-3 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.18em] text-ink-soft"
+            >
+              <span className="relative flex h-2 w-2" aria-hidden>
+                {health === null ? null : health.live ? (
+                  <>
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+                  </>
+                ) : (
+                  <span className="inline-flex h-2 w-2 rounded-full bg-line" />
+                )}
+              </span>
+              {health === null ? "" : health.live ? "live" : "demo"}
             </li>
           </ul>
 

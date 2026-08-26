@@ -1,276 +1,563 @@
 import { useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Camera, Mic, SendHorizontal } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import { ArrowRight, Paperclip, X } from "lucide-react";
+import type { LiveTile } from "../../services/liveTiles";
 
-type Message = {
-  id: number;
-  role: "user" | "bot";
-  text: string;
+/* ────────────────────────────────────────────────────────────────
+   The Briefing Desk — not a chatbot.
+
+   Queries are "filed", answers are assembled into dossiers:
+   editorial verdict text + measured evidence cards (growth,
+   engagement, keywords) + real Instagram images. No bubbles,
+   no bottom input bar, no assistant persona.
+   ──────────────────────────────────────────────────────────────── */
+
+type EvidenceCluster = {
+  name?: string;
+  keywords?: string[];
+  growth_rate?: number | null;
+  emerging_score?: number;
+  avg_likes?: number | null;
+  avg_comments?: number | null;
 };
 
-const WELCOME =
-  "Hey — I'm the TrendLens bot. Ask me what's trending in food, fashion, photography or beauty right now, or upload a photo and I'll tell you what aesthetic I see.";
+type Briefing = {
+  id: number;
+  seq: number;
+  query: string;
+  hadAttachment: boolean;
+  status: "reading" | "done";
+  answer?: string;
+  clusters?: EvidenceCluster[];
+  images?: string[];
+  live?: boolean;
+};
 
-const MOCK_REPLIES: Array<[RegExp, string]> = [
-  [
-    /trend|rising|hot|popular|emerging|aesthetic|viral/i,
-    "Right now the strongest risers in the index are minimalist latte art (steady climb for ~10 days) and rustic brunch spreads (small base, fast growth). Both are still mostly unnamed — which is exactly why they're interesting.",
-  ],
-  [
-    /food|cafe|coffee|latte|dessert|brunch|pastry/i,
-    "In food, the winning grammar this window: warm natural light, hands-in-frame action, forty-five degree table angles. The highest-engagement look pairs a single hero object with an uncluttered surface.",
-  ],
-  [
-    /fashion|outfit|style|streetwear/i,
-    "Fashion clusters are quieter this week, but layered neutral outfits with textured fabrics (linen, raw denim) keep growing. Vintage/thrifted looks hold steady — that one stopped being 'emerging' about six months ago.",
-  ],
-  [
-    /photo|photography|camera|light/i,
-    "Photography side: film-grain looks and high-contrast street scenes at night are both rising. Natural light dominates food; hard flash is creeping back into party content.",
-  ],
+const SAMPLE_QUERIES = [
+  "What cafe aesthetic is rising this week?",
+  "What kind of latte art gets the most engagement?",
+  "What makeup looks are trending on Instagram?",
+  "Which photography styles are going viral?",
 ];
 
-function mockReply(query: string): string {
-  for (const [pattern, reply] of MOCK_REPLIES) {
-    if (pattern.test(query)) return reply;
-  }
-  return "Interesting angle. My index covers visual trends across food, fashion, photography and beauty — ask me what's rising in any of those, or describe a look you keep seeing and I'll tell you if it's clustered yet.";
+function mockAnswer(query: string): string {
+  if (/food|cafe|coffee|latte|dessert|brunch/i.test(query))
+    return "**Warm natural light** is doing the heavy lifting across rising food clusters right now — paired with hands-in-frame action and forty-five degree table angles. The highest-engagement grammar pairs a single hero object with an uncluttered surface.";
+  if (/fashion|outfit|street/i.test(query))
+    return "Layered neutral outfits with textured fabrics — linen, raw denim — keep climbing. Vintage cuts hold steady rather than rise: that cluster stopped being *emerging* months ago.";
+  if (/photo|light|camera/i.test(query))
+    return "Film-grain looks and high-contrast night street scenes are the two risers in photography. Natural light dominates food content; hard flash is creeping back into party coverage.";
+  return "The strongest signal this window is minimalist execution across niches — one subject, generous negative space, warm light. Small bases, fast growth, still unnamed.";
 }
 
-async function fetchBotReply(query: string): Promise<{ text: string; live: boolean }> {
+async function fileQuery(
+  query: string
+): Promise<Omit<Briefing, "id" | "seq" | "query" | "hadAttachment" | "status">> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 9000);
+    const timer = setTimeout(() => controller.abort(), 12000);
     const res = await fetch("/api/rag-query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
       signal: controller.signal,
     });
-    clearTimeout(timeout);
-    if (!res.ok) throw new Error(`status ${res.status}`);
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
-    if (!data?.answer || data?.inScope === false) {
-      return {
-        text:
-          typeof data?.answer === "string"
-            ? data.answer
-            : mockReply(query),
-        live: Boolean(data?.answer),
-      };
-    }
-    return { text: String(data.answer), live: true };
+    return {
+      answer: typeof data?.answer === "string" ? data.answer : mockAnswer(query),
+      clusters: Array.isArray(data?.retrievedClusters)
+        ? data.retrievedClusters
+        : [],
+      images: Array.isArray(data?.supportingImages) ? data.supportingImages : [],
+      live: true,
+    };
   } catch {
-    return { text: mockReply(query), live: false };
+    return {
+      answer: mockAnswer(query),
+      clusters: [],
+      images: [],
+      live: false,
+    };
   }
 }
 
-export default function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([
-    { id: 0, role: "bot", text: WELCOME },
-  ]);
-  const [input, setInput] = useState("");
-  const [typing, setTyping] = useState(false);
-  const [attachment, setAttachment] = useState<string | null>(null);
-  const [listening, setListening] = useState(false);
-  const listRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const nextId = useRef(1);
-  const reduce = useReducedMotion();
+/* ── formatting helpers ── */
 
-  const scrollToBottom = () => {
-    requestAnimationFrame(() => {
-      listRef.current?.scrollTo({
-        top: listRef.current.scrollHeight,
-        behavior: reduce ? "auto" : "smooth",
-      });
-    });
-  };
+const fmtCount = (n?: number | null): string => {
+  if (n == null || Number.isNaN(n)) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(Math.round(n));
+};
 
-  const push = (msg: Omit<Message, "id">) => {
-    setMessages((prev) => [...prev, { ...msg, id: nextId.current++ }]);
-    scrollToBottom();
-  };
+const fmtGrowth = (g?: number | null): { text: string; positive: boolean } | null => {
+  if (g == null || Number.isNaN(g)) return null;
+  const pct = Math.round(g * 100);
+  return { text: `${pct >= 0 ? "+" : ""}${pct}%`, positive: pct >= 0 };
+};
 
-  const send = async () => {
-    const text = input.trim();
-    if ((!text && !attachment) || typing) return;
-    const shown = attachment ? `[photo attached] ${text}` : text;
-    push({ role: "user", text: shown.trim() });
-    setInput("");
-    const hadAttachment = attachment;
-    setAttachment(null);
-    setTyping(true);
+/* ── sub components ── */
 
-    let result: { text: string; live: boolean };
-    if (hadAttachment) {
-      await new Promise((r) => setTimeout(r, 1100));
-      result = {
-        text: "I can see the photo you attached. Visual understanding lands here soon — meanwhile, describe it in a few words (e.g. 'latte art on a wooden table') and I'll check whether it's part of any rising cluster.",
-        live: false,
-      };
-    } else {
-      result = await fetchBotReply(text);
-    }
-
-    setTyping(false);
-    push({ role: "bot", text: result.text });
-  };
-
-  const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setAttachment(file.name);
-    e.target.value = "";
-  };
-
-  const toggleMic = () => {
-    setListening((v) => !v);
-    window.setTimeout(() => setListening(false), 2200);
-  };
+function EvidenceCard({
+  cluster,
+  maxScore,
+}: {
+  cluster: EvidenceCluster;
+  maxScore: number;
+}) {
+  const growth = fmtGrowth(cluster.growth_rate);
+  const score = cluster.emerging_score ?? 0;
+  const width = maxScore > 0 ? Math.max(6, (score / maxScore) * 100) : 6;
 
   return (
-    <div className="flex h-[calc(100svh-4rem)] flex-col pt-16 md:h-screen">
-      {/* messages */}
-      <div
-        ref={listRef}
-        aria-live="polite"
-        className="flex-1 space-y-5 overflow-y-auto px-5 py-8 md:px-10"
-      >
-        <div className="mx-auto max-w-2xl space-y-5">
-          <AnimatePresence initial={false}>
-            {messages.map((m) => (
-              <motion.div
-                key={m.id}
-                initial={{ opacity: 0, y: reduce ? 0 : 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ type: "spring", stiffness: 300, damping: 26 }}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-5 py-3.5 text-sm leading-relaxed md:text-base ${
-                    m.role === "user"
-                      ? "rounded-br-sm bg-ink text-paper"
-                      : "rounded-bl-sm border border-line bg-paper-deep text-ink"
-                  }`}
-                >
-                  {m.text}
-                </div>
-              </motion.div>
-            ))}
-            {typing && (
-              <motion.div
-                key="typing"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex justify-start"
-              >
-                <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-line bg-paper-deep px-5 py-4">
-                  {[0, 1, 2].map((i) => (
-                    <motion.span
-                      key={i}
-                      animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }}
-                      transition={{
-                        duration: 0.9,
-                        repeat: Infinity,
-                        delay: i * 0.15,
-                      }}
-                      className="h-1.5 w-1.5 rounded-full bg-ink-soft"
-                    />
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+    <motion.li
+      layout
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 260, damping: 24 }}
+      className="group border border-line bg-paper p-5 transition-colors hover:border-ink"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <h4 className="font-display text-lg font-semibold leading-snug">
+          {cluster.name || "Unnamed cluster"}
+        </h4>
+        {growth && (
+          <span
+            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium tabular-nums ${
+              growth.positive
+                ? "bg-accent-soft text-ink"
+                : "border border-line text-ink-soft"
+            }`}
+          >
+            {growth.text}
+          </span>
+        )}
+      </div>
+
+      {/* emerging score meter */}
+      <div className="mt-4">
+        <div className="mb-1 flex justify-between text-[10px] uppercase tracking-[0.2em] text-ink-soft">
+          <span>emerging score</span>
+          <span className="tabular-nums">{score.toFixed(2)}</span>
+        </div>
+        <div className="h-1 w-full bg-line/60">
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: `${width}%` }}
+            transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
+            className="h-full bg-accent"
+          />
         </div>
       </div>
 
-      {/* composer */}
-      <div className="border-t border-line px-5 pb-6 pt-4 md:px-10">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
-          }}
-          className="mx-auto max-w-2xl"
-        >
-          {attachment && (
-            <p className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-soft px-3 py-1 text-xs text-ink">
-              Attached: {attachment}
+      {(cluster.avg_likes != null || cluster.avg_comments != null) && (
+        <dl className="mt-4 flex gap-6 text-sm">
+          <div>
+            <dt className="text-[10px] uppercase tracking-[0.2em] text-ink-soft">
+              avg likes
+            </dt>
+            <dd className="font-display font-medium tabular-nums">
+              {fmtCount(cluster.avg_likes)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[10px] uppercase tracking-[0.2em] text-ink-soft">
+              comments
+            </dt>
+            <dd className="font-display font-medium tabular-nums">
+              {fmtCount(cluster.avg_comments)}
+            </dd>
+          </div>
+        </dl>
+      )}
+
+      {Boolean(cluster.keywords?.length) && (
+        <ul className="mt-4 flex flex-wrap gap-1.5" aria-label="visual keywords">
+          {cluster.keywords!.slice(0, 5).map((k) => (
+            <li
+              key={k}
+              className="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-ink-soft"
+            >
+              {k}
+            </li>
+          ))}
+        </ul>
+      )}
+    </motion.li>
+  );
+}
+
+function ReadingIndicator() {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex items-center gap-3 py-2 text-xs uppercase tracking-[0.25em] text-ink-soft"
+      role="status"
+    >
+      <span className="relative flex h-2 w-2" aria-hidden>
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+      </span>
+      reading the last 10 days of posts…
+    </motion.div>
+  );
+}
+
+function Markdown({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      components={{
+        p: ({ children }) => (
+          <p className="mb-4 leading-relaxed last:mb-0">{children}</p>
+        ),
+        strong: ({ children }) => (
+          <strong className="font-semibold text-ink">{children}</strong>
+        ),
+        em: ({ children }) => <em>{children}</em>,
+        h1: ({ children }) => (
+          <h3 className="mb-3 font-display text-2xl font-bold">{children}</h3>
+        ),
+        h2: ({ children }) => (
+          <h3 className="mb-3 font-display text-2xl font-bold">{children}</h3>
+        ),
+        h3: ({ children }) => (
+          <h4 className="mb-2 font-display text-xl font-semibold">{children}</h4>
+        ),
+        ul: ({ children }) => (
+          <ul className="mb-4 space-y-1.5 pl-5 [&_li]:list-disc">{children}</ul>
+        ),
+        ol: ({ children }) => (
+          <ol className="mb-4 space-y-1.5 pl-5 [&_li]:list-decimal">{children}</ol>
+        ),
+        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+        code: ({ children }) => (
+          <code className="rounded bg-paper-deep px-1.5 py-0.5 text-[0.9em]">
+            {children}
+          </code>
+        ),
+        a: ({ href, children }) => (
+          <a href={href} className="underline decoration-line underline-offset-4 hover:decoration-accent">
+            {children}
+          </a>
+        ),
+        blockquote: ({ children }) => (
+          <blockquote className="mb-4 border-l-2 border-accent pl-4 italic text-ink-soft">
+            {children}
+          </blockquote>
+        ),
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
+
+/* ── main component ── */
+
+export default function ChatInterface() {
+  const [input, setInput] = useState("");
+  const [attachment, setAttachment] = useState<string | null>(null);
+  const [briefings, setBriefings] = useState<Briefing[]>([]);
+  const listTopRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const reduce = useReducedMotion();
+
+  const busy = briefings.some((b) => b.status === "reading");
+
+  const file = async () => {
+    const text = input.trim();
+    if ((!text && !attachment) || busy) return;
+
+    const entry: Briefing = {
+      id: Date.now(),
+      seq: briefings.length + 1,
+      query: attachment ? `${text}  ·  attached: ${attachment}` : text,
+      hadAttachment: Boolean(attachment),
+      status: "reading",
+    };
+    setInput("");
+    const hadAttachment = attachment;
+    setAttachment(null);
+    setBriefings((prev) => [...prev, entry]);
+
+    // newest dossier appears at the top — bring it into view
+    requestAnimationFrame(() =>
+      listTopRef.current?.scrollIntoView({
+        behavior: reduce ? "auto" : "smooth",
+        block: "start",
+      })
+    );
+
+    let result;
+    if (hadAttachment) {
+      await new Promise((r) => setTimeout(r, 1100));
+      result = {
+        answer:
+          "Image understanding arrives here soon. Meanwhile, describe the look in a few words — *latte art on a wooden table* — and file it again to check whether it matches any rising cluster.",
+        clusters: [],
+        images: [],
+        live: false,
+      };
+    } else {
+      result = await fileQuery(text);
+    }
+
+    setBriefings((prev) =>
+      prev.map((b) =>
+        b.id === entry.id
+          ? { ...b, ...result, status: "done" }
+          : b
+      )
+    );
+  };
+
+  return (
+    <div className="min-h-svh pt-16">
+      {/* ── desk header + filing console (top, not bottom) ── */}
+      <div className="border-b border-line bg-paper/95 backdrop-blur">
+        <div className="mx-auto max-w-4xl px-5 pb-8 pt-10 md:px-8 md:pt-14">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <h1 className="cropped-heading font-display text-4xl font-bold md:text-6xl">
+              The Lens
+            </h1>
+            <p className="max-w-xs text-xs leading-relaxed text-ink-soft">
+              File a query. Get back measured signals — growth, engagement,
+              real posts — not opinions.
+            </p>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void file();
+            }}
+            className="mt-8"
+          >
+            <div className="flex items-center gap-4 border-b-2 border-line pb-3 transition-colors focus-within:border-ink">
+              <label htmlFor="lens-query" className="sr-only">
+                Your query
+              </label>
+              <input
+                id="lens-query"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="File a query — what's rising?"
+                autoComplete="off"
+                disabled={busy}
+                className="min-w-0 flex-1 bg-transparent font-display text-xl text-ink placeholder:text-ink/30 focus:outline-none disabled:opacity-40 md:text-3xl [caret-color:var(--color-accent)]"
+              />
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) setAttachment(f.name);
+                  e.target.value = "";
+                }}
+                className="hidden"
+              />
               <button
                 type="button"
-                onClick={() => setAttachment(null)}
-                aria-label="Remove attachment"
-                className="font-semibold text-accent"
+                onClick={() => fileRef.current?.click()}
+                title="Attach reference photo"
+                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink sm:flex"
               >
-                ×
+                <Paperclip className="h-4 w-4" aria-hidden />
+                <span className="sr-only">Attach reference photo</span>
               </button>
+              <button
+                type="submit"
+                disabled={(!input.trim() && !attachment) || busy}
+                aria-label="File query"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-transform enabled:hover:-translate-y-0.5 disabled:opacity-25"
+              >
+                <ArrowRight className="h-5 w-5" aria-hidden />
+              </button>
+            </div>
+
+            {attachment && (
+              <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-accent-soft px-3 py-1 text-xs">
+                {attachment}
+                <button
+                  type="button"
+                  onClick={() => setAttachment(null)}
+                  aria-label="Remove attachment"
+                  className="text-accent"
+                >
+                  <X className="h-3 w-3" aria-hidden />
+                </button>
+              </p>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {SAMPLE_QUERIES.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setInput(q)}
+                  className="rounded-full border border-line px-3.5 py-1.5 text-xs text-ink-soft transition-colors hover:border-ink hover:text-ink disabled:opacity-40"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* ── dossiers ── */}
+      <div className="mx-auto max-w-4xl px-5 md:px-8">
+        {briefings.length === 0 ? (
+          <div className="py-20 md:py-28">
+            <p className="text-xs uppercase tracking-[0.3em] text-ink-soft">
+              Nothing filed yet
             </p>
-          )}
-          <div className="flex items-end gap-2 rounded-2xl border border-line bg-paper-deep p-2 focus-within:border-ink">
-            <label
-              htmlFor="chat-camera"
-              className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-line/50 hover:text-ink"
-              title="Attach a photo"
-            >
-              <Camera className="h-5 w-5" aria-hidden />
-              <span className="sr-only">Attach a photo</span>
-            </label>
-            <input
-              id="chat-camera"
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              onChange={onPickFile}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={toggleMic}
-              aria-pressed={listening}
-              title="Voice input (coming soon)"
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-line/50 ${
-                listening ? "text-accent" : "text-ink-soft hover:text-ink"
-              }`}
-            >
-              <Mic
-                className={`h-5 w-5 ${listening && !reduce ? "animate-pulse" : ""}`}
-                aria-hidden
-              />
-              <span className="sr-only">Voice input</span>
-            </button>
-            <label htmlFor="chat-input" className="sr-only">
-              Message
-            </label>
-            <textarea
-              id="chat-input"
-              rows={1}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-              placeholder="Ask about a trend…"
-              className="max-h-32 flex-1 resize-none bg-transparent py-2.5 text-sm focus:outline-none md:text-base"
-            />
-            <button
-              type="submit"
-              disabled={!input.trim() && !attachment}
-              aria-label="Send message"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-transform enabled:hover:-translate-y-0.5 disabled:opacity-30"
-            >
-              <SendHorizontal className="h-4.5 w-4.5" aria-hidden />
-            </button>
+            <p className="mt-4 max-w-md font-display text-2xl leading-snug md:text-3xl">
+              Go on —{" "}
+              <button
+                type="button"
+                onClick={() => setInput(SAMPLE_QUERIES[0])}
+                className="hand-underline text-left transition-colors hover:text-accent"
+              >
+                ask what's rising
+              </button>
+              . The lens reads the feed, not the internet.
+            </p>
           </div>
-          <p className="mt-2 text-center text-[11px] text-ink-soft">
-            Answers come from the TrendLens pipeline when it's running — otherwise from demo data.
-          </p>
-        </form>
+        ) : (
+          <>
+            <div ref={listTopRef} aria-hidden />
+            <ol className="divide-y divide-line">
+            <AnimatePresence initial={false}>
+              {[...briefings].reverse().map((b) => (
+                <motion.li
+                  key={b.id}
+                  initial={{ opacity: 0, y: reduce ? 0 : 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                  className="py-12 first:pt-12 md:py-16"
+                >
+                  {/* the query, as a filed headline */}
+                  <div className="mb-8 flex items-baseline gap-4">
+                    <span className="shrink-0 font-display text-xs tabular-nums text-ink-soft">
+                      Q{String(b.seq).padStart(2, "0")}
+                    </span>
+                    <h2 className="font-display text-2xl font-semibold italic leading-tight text-ink md:text-4xl">
+                      “{b.query}”
+                    </h2>
+                  </div>
+
+                  <AnimatePresence mode="wait">
+                    {b.status === "reading" ? (
+                      <ReadingIndicator key="reading" />
+                    ) : (
+                      <motion.div
+                        key="dossier"
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5 }}
+                      >
+                        {/* provenance stamp */}
+                        <p className="mb-6 flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-ink-soft">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              b.live ? "bg-accent" : "bg-ink-soft/50"
+                            }`}
+                            aria-hidden
+                          />
+                          {b.live
+                            ? "assembled from live pipeline data"
+                            : "demo signals — backend offline"}
+                        </p>
+
+                        {/* verdict */}
+                        <div className="max-w-2xl text-base text-ink/90 md:text-lg">
+                          <Markdown text={b.answer ?? ""} />
+                        </div>
+
+                        {/* measured evidence */}
+                        {Boolean(b.clusters?.length) && (
+                          <div className="mt-10">
+                            <p className="mb-4 text-[11px] uppercase tracking-[0.25em] text-ink-soft">
+                              Measured evidence
+                            </p>
+                            <ul className="grid gap-4 sm:grid-cols-2">
+                              {(() => {
+                                const max = Math.max(
+                                  ...(b.clusters ?? []).map(
+                                    (c) => c.emerging_score ?? 0
+                                  )
+                                );
+                                return (b.clusters ?? [])
+                                  .slice(0, 4)
+                                  .map((c, j) => (
+                                    <EvidenceCard
+                                      key={j}
+                                      cluster={c}
+                                      maxScore={max}
+                                    />
+                                  ));
+                              })()}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* visual proof */}
+                        {Boolean(b.images?.length) && (
+                          <div className="mt-10">
+                            <p className="mb-4 text-[11px] uppercase tracking-[0.25em] text-ink-soft">
+                              From the actual feed
+                            </p>
+                            <div className="flex gap-3 overflow-x-auto pb-2">
+                              {b.images!.slice(0, 6).map((src, j) => (
+                                <LiveTileImg key={j} src={src} idx={j} />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.li>
+              ))}
+            </AnimatePresence>
+          </ol>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+function LiveTileImg({ src, idx }: { src: string; idx: number }) {
+  const [ok, setOk] = useState(true);
+  const [dims, setDims] = useState<{ w: number; h: number }>({ w: 96, h: 128 });
+  if (!ok) return null;
+  return (
+    <motion.img
+      src={src}
+      alt={`Instagram post ${idx + 1} from the matched trend`}
+      loading="lazy"
+      onLoad={(e) => {
+        const img = e.currentTarget;
+        setDims({
+          w: Math.max(72, Math.min(140, img.naturalWidth / 2)),
+          h: Math.max(96, Math.min(180, img.naturalHeight / 2)),
+        });
+      }}
+      onError={() => setOk(false)}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: idx * 0.06 }}
+      className="rounded-sm object-cover grayscale transition-all duration-500 hover:grayscale-0"
+      style={{ width: dims.w, height: dims.h }}
+    />
   );
 }
