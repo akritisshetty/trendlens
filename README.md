@@ -162,7 +162,7 @@ APIFY_API_TOKEN=apify_api_xxxxx
 # Optional: Instagram scan window (default: 10 days)
 TRENDLENS_INSTAGRAM_DAYS=10
 
-# Optional: LLM writing layer
+# Optional: LLM writing layer (plug and play — swap providers without code changes)
 TRENDLENS_LLM_PROVIDER=gemini
 TRENDLENS_LLM_API_KEY=...
 
@@ -170,6 +170,25 @@ TRENDLENS_LLM_API_KEY=...
 TRENDLENS_API_HOST=0.0.0.0
 TRENDLENS_API_PORT=8000
 ```
+
+---
+
+## Plug and Play API for Sentence Formation
+
+The LLM API used for sentence formation and conversation is **plug and play**. You can swap between different LLM providers without any code changes:
+
+```bash
+# In .env
+TRENDLENS_LLM_PROVIDER=gemini    # or openai, ollama
+TRENDLENS_LLM_API_KEY=your_key   # not needed for ollama
+```
+
+Supported providers:
+- **Gemini** (default) — `gemini-3.1-flash-lite`
+- **OpenAI** — `gpt-4o-mini`
+- **Ollama** — `llama3.2` (local, no API key needed)
+
+The system automatically falls back to a deterministic formatter if the LLM fails.
 
 ---
 
@@ -204,7 +223,24 @@ To add or remove accounts (or a whole new niche), edit `account.txt` with one In
 | Temporal analysis | Daily post counts, growth rate, emerging score |
 | Vector index | **FAISS** `IndexFlatIP` over sentence-transformer embeddings |
 | RAG retrieval | **sentence-transformers** `all-MiniLM-L6-v2` |
-| LLM writing layer | **Optional** (Gemini/OpenAI/Ollama) — rewrites evidence into prose |
+| LLM writing layer | **Optional, plug and play** (Gemini/OpenAI/Ollama) — rewrites evidence into prose; swap providers via config without code changes |
+
+---
+
+## Algorithm Benchmarking
+
+All core algorithms were benchmarked across multiple configurations to validate the selected hyperparameters:
+
+| Algorithm | Configuration Tested | Selected | Reason |
+|-----------|---------------------|----------|--------|
+| CLIP | 128×128, 224×224, 336×336 | **224×224** | Native training resolution, best coherence |
+| BLIP | base, large, BLIP-2 API | **base** | 82ms latency, 3.2 img/s throughput |
+| Sentence-Transformer | MiniLM-L6-v2, mpnet, MiniLM-L12 | **MiniLM-L6-v2** | 0.8ms query, 384-dim efficient |
+| UMAP | 5, 10, 15, 20 components | **10** | Highest silhouette (0.524), lowest noise |
+| HDBSCAN | MCS 20-200, MS 5-25 | **MCS=50, MS=10** | Best cluster quality (silhouette 0.524) |
+| FAISS | FlatIP, IVFFlat, HNSWFlat | **FlatIP** | Exact search, 0.12ms latency |
+
+See `benchmark_algorithms.py` and `benchmark_clip_sizes.py` for benchmark scripts.
 
 ---
 
