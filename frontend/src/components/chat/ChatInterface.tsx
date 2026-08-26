@@ -5,17 +5,14 @@ import { ArrowRight } from "lucide-react";
 import {
   fileQuery,
   useBriefings,
-  type Briefing,
-  type EvidenceCluster,
 } from "../../lib/briefingStore";
 
 /* ────────────────────────────────────────────────────────────────
    The Briefing Desk — not a chatbot.
 
    Queries are "filed", answers are assembled into dossiers:
-   editorial verdict text + measured evidence cards (growth,
-   engagement, keywords) + real Instagram images. No bubbles,
-   no bottom input bar, no assistant persona.
+   editorial verdict text only. No bubbles, no bottom input bar,
+   no assistant persona.
 
    Briefings persist in a module-level store (see briefingStore),
    so navigating away and back never loses a pending answer.
@@ -28,111 +25,7 @@ const SAMPLE_QUERIES = [
   "Which photography styles are going viral?",
 ];
 
-/* ── formatting helpers ── */
-
-const fmtCount = (n?: number | null): string => {
-  if (n == null || Number.isNaN(n)) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(Math.round(n));
-};
-
-const fmtGrowth = (g?: number | null): { text: string; positive: boolean } | null => {
-  if (g == null || Number.isNaN(g)) return null;
-  const pct = Math.round(g * 100);
-  return { text: `${pct >= 0 ? "+" : ""}${pct}%`, positive: pct >= 0 };
-};
-
 /* ── sub components ── */
-
-function EvidenceCard({
-  cluster,
-  maxScore,
-}: {
-  cluster: EvidenceCluster;
-  maxScore: number;
-}) {
-  const growth = fmtGrowth(cluster.growth_rate);
-  const score = cluster.emerging_score ?? 0;
-  const width = maxScore > 0 ? Math.max(6, (score / maxScore) * 100) : 6;
-
-  return (
-    <motion.li
-      layout
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: "spring", stiffness: 260, damping: 24 }}
-      className="group border border-line bg-paper p-5 transition-colors hover:border-ink"
-    >
-      <div className="flex items-start justify-between gap-4">
-        <h4 className="font-display text-lg font-semibold leading-snug">
-          {cluster.name || "Unnamed cluster"}
-        </h4>
-        {growth && (
-          <span
-            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium tabular-nums ${
-              growth.positive
-                ? "bg-accent-soft text-ink"
-                : "border border-line text-ink-soft"
-            }`}
-          >
-            {growth.text}
-          </span>
-        )}
-      </div>
-
-      {/* emerging score meter */}
-      <div className="mt-4">
-        <div className="mb-1 flex justify-between text-[10px] uppercase tracking-[0.2em] text-ink-soft">
-          <span>emerging score</span>
-          <span className="tabular-nums">{score.toFixed(2)}</span>
-        </div>
-        <div className="h-1 w-full bg-line/60">
-          <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${width}%` }}
-            transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
-            className="h-full bg-accent"
-          />
-        </div>
-      </div>
-
-      {(cluster.avg_likes != null || cluster.avg_comments != null) && (
-        <dl className="mt-4 flex gap-6 text-sm">
-          <div>
-            <dt className="text-[10px] uppercase tracking-[0.2em] text-ink-soft">
-              avg likes
-            </dt>
-            <dd className="font-display font-medium tabular-nums">
-              {fmtCount(cluster.avg_likes)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[10px] uppercase tracking-[0.2em] text-ink-soft">
-              comments
-            </dt>
-            <dd className="font-display font-medium tabular-nums">
-              {fmtCount(cluster.avg_comments)}
-            </dd>
-          </div>
-        </dl>
-      )}
-
-      {Boolean(cluster.keywords?.length) && (
-        <ul className="mt-4 flex flex-wrap gap-1.5" aria-label="visual keywords">
-          {cluster.keywords!.slice(0, 5).map((k) => (
-            <li
-              key={k}
-              className="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-ink-soft"
-            >
-              {k}
-            </li>
-          ))}
-        </ul>
-      )}
-    </motion.li>
-  );
-}
 
 function ReadingIndicator() {
   return (
@@ -225,8 +118,8 @@ export default function ChatInterface() {
               The Lens
             </h1>
             <p className="max-w-xs text-xs leading-relaxed text-ink-soft">
-              File a query. Get back measured signals — growth, engagement,
-              real posts — not opinions.
+              File a query. Get back a grounded trend insight — not
+              opinions.
             </p>
           </div>
 
@@ -315,7 +208,7 @@ export default function ChatInterface() {
                       Q{String(b.seq).padStart(2, "0")}
                     </span>
                     <h2 className="font-display text-2xl font-semibold italic leading-tight text-ink md:text-4xl">
-                      “{b.query}”
+                      "{b.query}"
                     </h2>
                   </div>
 
@@ -354,47 +247,6 @@ export default function ChatInterface() {
                             and file it again.
                           </p>
                         )}
-
-                        {/* measured evidence */}
-                        {Boolean(b.clusters?.length) && (
-                          <div className="mt-10">
-                            <p className="mb-4 text-[11px] uppercase tracking-[0.25em] text-ink-soft">
-                              Measured evidence
-                            </p>
-                            <ul className="grid gap-4 sm:grid-cols-2">
-                              {(() => {
-                                const max = Math.max(
-                                  ...(b.clusters ?? []).map(
-                                    (c) => c.emerging_score ?? 0
-                                  )
-                                );
-                                return (b.clusters ?? [])
-                                  .slice(0, 4)
-                                  .map((c, j) => (
-                                    <EvidenceCard
-                                      key={j}
-                                      cluster={c}
-                                      maxScore={max}
-                                    />
-                                  ));
-                              })()}
-                            </ul>
-                          </div>
-                        )}
-
-                        {/* visual proof */}
-                        {Boolean(b.images?.length) && (
-                          <div className="mt-10">
-                            <p className="mb-4 text-[11px] uppercase tracking-[0.25em] text-ink-soft">
-                              From the actual feed
-                            </p>
-                            <div className="flex gap-3 overflow-x-auto pb-2">
-                              {b.images!.slice(0, 6).map((src, j) => (
-                                <LiveTileImg key={j} src={src} idx={j} />
-                              ))}
-                            </div>
-                          </div>
-                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -406,31 +258,5 @@ export default function ChatInterface() {
         )}
       </div>
     </div>
-  );
-}
-
-function LiveTileImg({ src, idx }: { src: string; idx: number }) {
-  const [ok, setOk] = useState(true);
-  const [dims, setDims] = useState<{ w: number; h: number }>({ w: 96, h: 128 });
-  if (!ok) return null;
-  return (
-    <motion.img
-      src={src}
-      alt={`Social media post ${idx + 1} from the matched trend`}
-      loading="lazy"
-      onLoad={(e) => {
-        const img = e.currentTarget;
-        setDims({
-          w: Math.max(72, Math.min(140, img.naturalWidth / 2)),
-          h: Math.max(96, Math.min(180, img.naturalHeight / 2)),
-        });
-      }}
-      onError={() => setOk(false)}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ delay: idx * 0.06 }}
-      className="rounded-sm object-cover grayscale transition-all duration-500 hover:grayscale-0"
-      style={{ width: dims.w, height: dims.h }}
-    />
   );
 }

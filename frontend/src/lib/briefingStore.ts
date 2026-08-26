@@ -8,23 +8,12 @@ import { useSyncExternalStore } from "react";
    results — as long as the site stays open in the tab.
    ──────────────────────────────────────────────────────────────── */
 
-export type EvidenceCluster = {
-  name?: string;
-  keywords?: string[];
-  growth_rate?: number | null;
-  emerging_score?: number;
-  avg_likes?: number | null;
-  avg_comments?: number | null;
-};
-
 export type Briefing = {
   id: number;
   seq: number;
   query: string;
   status: "reading" | "done";
   answer?: string;
-  clusters?: EvidenceCluster[];
-  images?: string[];
   live?: boolean;
 };
 
@@ -73,16 +62,10 @@ async function fetchAnswer(query: string, id: number) {
     update(id, {
       status: "done",
       answer: typeof data?.answer === "string" ? data.answer : "",
-      clusters: Array.isArray(data?.retrievedClusters)
-        ? data.retrievedClusters
-        : [],
-      images: Array.isArray(data?.supportingImages)
-        ? data.supportingImages
-        : [],
       live: true,
     });
   } catch {
-    update(id, { status: "done", answer: "", clusters: [], images: [], live: false });
+    update(id, { status: "done", answer: "", live: false });
   }
 }
 
