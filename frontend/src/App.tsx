@@ -1,33 +1,48 @@
-import React from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { LandingPage } from './pages/LandingPage';
-import { ChatbotPage } from './pages/ChatbotPage';
-import { Layout } from './components/layout/Layout';
-import { DashboardPage } from './pages/DashboardPage';
-import { ClusterExplorerPage } from './pages/ClusterExplorerPage';
-import { TrendQueryPage } from './pages/TrendQueryPage';
-import { PredictionPage } from './pages/PredictionPage';
-import { AnalyticsPage } from './pages/AnalyticsPage';
+import { useEffect } from "react";
+import { Route, Routes, useLocation } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
+import Navigation from "./components/navigation/Navigation";
+import Home from "./pages/Home";
+import Blog from "./pages/Blog";
+import BlogPost from "./pages/BlogPost";
+import Chat from "./pages/Chat";
+import Help from "./pages/Help";
+import Login from "./pages/Login";
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+  }, [pathname]);
+  return null;
+}
 
 export default function App() {
+  const location = useLocation();
+
   return (
-    <Router>
-      <div className="min-h-screen bg-[#F8F5F0] text-[#3B342E] selection:bg-[#C7D2C1] selection:text-[#3B342E]">
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/chat" element={<ChatbotPage />} />
+    <div className="grain min-h-screen bg-paper text-ink">
+      <ScrollToTop />
+      <Navigation />
+      <AnimatePresence mode="wait">
+        <Routes location={location} key={location.pathname}>
+          <Route path="/" element={<Home />} />
+          <Route path="/blog" element={<Blog />} />
+          <Route path="/blog/:slug" element={<BlogPost />} />
+          <Route path="/chat" element={<Chat />} />
+          <Route path="/help" element={<Help />} />
+          <Route path="/login" element={<Login />} />
           <Route
-            element={<Layout />}
-          >
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/clusters" element={<ClusterExplorerPage />} />
-            <Route path="/query" element={<TrendQueryPage />} />
-            <Route path="/prediction" element={<PredictionPage />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
+            path="*"
+            element={
+              <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+                <p className="font-display text-6xl font-bold md:text-8xl">404</p>
+                <p className="text-ink-soft">This trend doesn't exist. Yet.</p>
+              </main>
+            }
+          />
         </Routes>
-      </div>
-    </Router>
+      </AnimatePresence>
+    </div>
   );
 }

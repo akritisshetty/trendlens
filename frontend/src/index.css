@@ -1,79 +1,95 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *));
+@theme {
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
 
-@layer base {
-  :root {
-    --bg-main: #F8F5F0;
-    --card-bg: #FFFCF8;
-    --btn-primary: #8A6A4A;
-    --btn-hover: #73553A;
-    --text-primary: #3B342E;
-    --text-secondary: #7A736C;
-    --border-color: #E7DED2;
-    --accent-sage: #C7D2C1;
+  --color-paper: #f7f5f0;
+  --color-paper-deep: #efede6;
+  --color-ink: #16140f;
+  --color-ink-soft: #55524a;
+  --color-line: #d8d4c9;
+  --color-accent: #ff4d00;
+  --color-accent-soft: #ffe3d6;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-paper);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* ── Marquee ─────────────────────────────────────────────── */
+@keyframes marquee-left {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@keyframes marquee-right {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+.marquee-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+}
+.marquee-track[data-direction="left"] {
+  animation: marquee-left var(--marquee-duration, 60s) linear infinite;
+}
+.marquee-track[data-direction="right"] {
+  animation: marquee-right var(--marquee-duration, 60s) linear infinite;
+}
+.marquee-row:hover .marquee-track,
+.marquee-row:focus-within .marquee-track {
+  animation-play-state: paused;
+}
+
+/* ── Grain / texture ─────────────────────────────────────── */
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── Editorial helpers ───────────────────────────────────── */
+.cropped-heading {
+  line-height: 0.86;
+  letter-spacing: -0.04em;
+}
+
+.hand-underline {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 12' preserveAspectRatio='none'%3E%3Cpath d='M2 8 C 30 2, 60 10, 118 5' fill='none' stroke='%23ff4d00' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: 100% 0.35em;
+  background-position: 0 100%;
+  padding-bottom: 0.15em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .marquee-track[data-direction] {
+    animation: none;
   }
-
-  body {
-    background-color: var(--bg-main);
-    color: var(--text-primary);
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    overflow-x: hidden;
-    -webkit-font-smoothing: antialiased;
-    transition: background-color 0.2s ease, color 0.2s ease;
-  }
-
-  .dark body {
-    background-color: #1C1815;
-    color: #F8F5F0;
-  }
-
-  h1, h2, h3, h4, .font-serif {
-    font-family: 'Cormorant Garamond', Georgia, serif;
-  }
 }
-
-/* Custom subtle scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: #F8F5F0;
-}
-
-.dark ::-webkit-scrollbar-track {
-  background: #1C1815;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #E7DED2;
-  border-radius: 9999px;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: #3E3832;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #D8CCC0;
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #524A42;
-}
-
-/* Organic background pattern */
-.bg-organic-pattern {
-  background-color: #F8F5F0;
-  background-image: radial-gradient(#E8DFD3 0.75px, transparent 0.75px);
-  background-size: 28px 28px;
-}
-
-.dark .bg-organic-pattern {
-  background-color: #1C1815;
-  background-image: radial-gradient(#2E2925 0.75px, transparent 0.75px);
-  background-size: 28px 28px;
-}
-
