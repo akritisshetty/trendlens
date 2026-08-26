@@ -8,7 +8,7 @@ type Faq = { q: string; a: string };
 const FAQS: Faq[] = [
   {
     q: "What is this thing, exactly?",
-    a: "TrendLens watches public Instagram posts and groups the images into visual clusters — aesthetics that look alike before anyone agrees on what to call them. Think of it as a smoke detector for trends: it goes off while the fire is still small.",
+    a: "TrendLens watches public social media posts and groups the images into visual clusters — aesthetics that look alike before anyone agrees on what to call them. Think of it as a smoke detector for trends: it goes off while the fire is still small.",
   },
   {
     q: "How do the trends work?",
@@ -28,7 +28,7 @@ const FAQS: Faq[] = [
   },
   {
     q: "Are the numbers real?",
-    a: "The engagement data comes from real public Instagram accounts. Cluster names are machine interpretations of the images — educated guesses, not gospel. We never invent stats we didn't measure.",
+    a: "The engagement data comes from real public social media accounts. Cluster names are machine interpretations of the images — educated guesses, not gospel. We never invent stats we didn't measure.",
   },
 ];
 

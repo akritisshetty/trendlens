@@ -4,6 +4,22 @@ import { ArrowLeft } from "lucide-react";
 import PageTransition from "../components/navigation/PageTransition";
 import { getPost } from "../data/blogPosts";
 
+/** Renders *italic* and **bold** markers as real <em>/<strong>. */
+function InlineText({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).filter(Boolean);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith("**") && part.endsWith("**"))
+          return <strong key={i}>{part.slice(2, -2)}</strong>;
+        if (part.startsWith("*") && part.endsWith("*"))
+          return <em key={i}>{part.slice(1, -1)}</em>;
+        return part;
+      })}
+    </>
+  );
+}
+
 export default function BlogPost() {
   const { slug } = useParams();
   const post = slug ? getPost(slug) : undefined;
@@ -74,7 +90,7 @@ export default function BlogPost() {
                 i === 0 ? "text-lg text-ink" : "text-base text-ink/85"
               }`}
             >
-              {para}
+              <InlineText text={para} />
             </motion.p>
           ))}
         </div>

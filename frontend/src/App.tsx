@@ -11,10 +11,21 @@ import Help from "./pages/Help";
 import Login from "./pages/Login";
 
 function ScrollToTop() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   useEffect(() => {
+    if (hash) {
+      // let the route render first, then scroll to the anchored section
+      const id = hash.slice(1);
+      const t = window.setTimeout(() => {
+        document.getElementById(id)?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 80);
+      return () => window.clearTimeout(t);
+    }
     window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
-  }, [pathname]);
+  }, [pathname, hash]);
   return null;
 }
 

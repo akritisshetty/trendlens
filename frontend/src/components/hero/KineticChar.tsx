@@ -20,6 +20,7 @@ type Props = {
 /**
  * A single character in the kinetic hero composition.
  * Idle: gentle vertical float. Cursor nearby: pushed away, springs back.
+ * Drag: grabs and follows the pointer, then springs back home.
  */
 export default function KineticChar({
   char,
@@ -30,6 +31,8 @@ export default function KineticChar({
   const reduce = useReducedMotion();
   const wrapRef = useRef<HTMLSpanElement>(null);
   const home = useRef({ x: 0, y: 0 });
+  const dragging = useRef(false);
+  const grab = useRef({ dx: 0, dy: 0 });
 
   const rawX = useMotionValue(0);
   const rawY = useMotionValue(0);
@@ -57,6 +60,7 @@ export default function KineticChar({
     const settleTimer = window.setTimeout(measure, 600);
 
     const unsubscribe = subscribePointer((pos) => {
+      if (dragging.current) return;
       const dx = home.current.x - pos.x;
       const dy = home.current.y - pos.y;
       const dist = Math.hypot(dx, dy);
@@ -79,6 +83,34 @@ export default function KineticChar({
     };
   }, [reduce, rawX, rawY, rotRaw, x, y]);
 
+  const onPointerDown = (e: React.PointerEvent<HTMLSpanElement>) => {
+    if (reduce) return;
+    dragging.current = true;
+    // offset between the pointer and the character's centre at grab time
+    grab.current = {
+      dx: home.current.x + x.get() - e.clientX,
+      dy: home.current.y + y.get() - e.clientY,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLSpanElement>) => {
+    if (!dragging.current || reduce) return;
+    rawX.set(e.clientX + grab.current.dx - home.current.x);
+    rawY.set(e.clientY + grab.current.dy - home.current.y);
+    // tilt in the direction of travel
+    rotRaw.set(grab.current.dx * -2);
+  };
+
+  const release = () => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    // spring back home
+    rawX.set(0);
+    rawY.set(0);
+    rotRaw.set(0);
+  };
+
   return (
     <motion.span
       ref={wrapRef}
@@ -96,7 +128,14 @@ export default function KineticChar({
       }
       className="inline-block will-change-transform"
     >
-      <motion.span style={{ x, y, rotate }} className={`inline-block ${className ?? ""}`}>
+      <motion.span
+        style={{ x, y, rotate, touchAction: "none" }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={release}
+        onPointerCancel={release}
+        className={`inline-block ${reduce ? "" : "cursor-grab active:cursor-grabbing"} ${className ?? ""}`}
+      >
         {char === " " ? "\u00A0" : char}
       </motion.span>
     </motion.span>

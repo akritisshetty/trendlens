@@ -21,6 +21,22 @@ export default function Hero() {
       aria-label="TrendLens intro"
       className="relative flex min-h-svh flex-col justify-center overflow-hidden px-5 md:px-10"
     >
+      {/* ambient glows */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 1.6, ease: "easeOut" }}
+          className="absolute -top-32 right-[-15%] h-[34rem] w-[34rem] rounded-full bg-accent/20 blur-[110px]"
+        />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 1.8, delay: 0.3, ease: "easeOut" }}
+          className="absolute bottom-[-20%] left-[-10%] h-[28rem] w-[28rem] rounded-full bg-[#ffb400]/25 blur-[120px]"
+        />
+      </div>
+
       <motion.div style={{ y: drift, opacity: fade }} className="relative">
         {/* kicker */}
         <motion.p

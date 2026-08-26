@@ -24,7 +24,7 @@ export default function TrendsSection() {
   }, []);
 
   return (
-    <section id="trends" aria-labelledby="trends-heading" className="py-24 md:py-36">
+    <section id="trends" aria-labelledby="trends-heading" className="scroll-mt-16 py-24 md:py-36">
       <header className="mb-12 flex flex-wrap items-end justify-between gap-6 px-5 md:mb-16 md:px-10">
         <div>
           <h2
@@ -41,13 +41,13 @@ export default function TrendsSection() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
               </span>
-              Live Instagram feed
+              Live social feed
             </p>
           )}
         </div>
         <p className="max-w-xs text-sm leading-relaxed text-ink-soft">
           {isLive
-            ? "Real posts pulled from public Instagram accounts by the TrendLens pipeline — theme representatives first."
+            ? "Real posts pulled from public social media accounts by the TrendLens pipeline — theme representatives first."
             : "A wall of visual culture — food, fashion, art, everything people can't stop posting. Hover to slow down and look closer."}
         </p>
       </header>

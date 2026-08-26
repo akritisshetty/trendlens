@@ -2,6 +2,12 @@ import { useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import { ArrowRight } from "lucide-react";
+import {
+  fileQuery,
+  useBriefings,
+  type Briefing,
+  type EvidenceCluster,
+} from "../../lib/briefingStore";
 
 /* ────────────────────────────────────────────────────────────────
    The Briefing Desk — not a chatbot.
@@ -10,77 +16,17 @@ import { ArrowRight } from "lucide-react";
    editorial verdict text + measured evidence cards (growth,
    engagement, keywords) + real Instagram images. No bubbles,
    no bottom input bar, no assistant persona.
+
+   Briefings persist in a module-level store (see briefingStore),
+   so navigating away and back never loses a pending answer.
    ──────────────────────────────────────────────────────────────── */
-
-type EvidenceCluster = {
-  name?: string;
-  keywords?: string[];
-  growth_rate?: number | null;
-  emerging_score?: number;
-  avg_likes?: number | null;
-  avg_comments?: number | null;
-};
-
-type Briefing = {
-  id: number;
-  seq: number;
-  query: string;
-  status: "reading" | "done";
-  answer?: string;
-  clusters?: EvidenceCluster[];
-  images?: string[];
-  live?: boolean;
-};
 
 const SAMPLE_QUERIES = [
   "What cafe aesthetic is rising this week?",
   "What kind of latte art gets the most engagement?",
-  "What makeup looks are trending on Instagram?",
+  "What makeup looks are trending on social media?",
   "Which photography styles are going viral?",
 ];
-
-function mockAnswer(query: string): string {
-  if (/food|cafe|coffee|latte|dessert|brunch/i.test(query))
-    return "**Warm natural light** is doing the heavy lifting across rising food clusters right now — paired with hands-in-frame action and forty-five degree table angles. The highest-engagement grammar pairs a single hero object with an uncluttered surface.";
-  if (/fashion|outfit|street/i.test(query))
-    return "Layered neutral outfits with textured fabrics — linen, raw denim — keep climbing. Vintage cuts hold steady rather than rise: that cluster stopped being *emerging* months ago.";
-  if (/photo|light|camera/i.test(query))
-    return "Film-grain looks and high-contrast night street scenes are the two risers in photography. Natural light dominates food content; hard flash is creeping back into party coverage.";
-  return "The strongest signal this window is minimalist execution across niches — one subject, generous negative space, warm light. Small bases, fast growth, still unnamed.";
-}
-
-async function fileQuery(
-  query: string
-): Promise<Omit<Briefing, "id" | "seq" | "query" | "status">> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
-    const res = await fetch("/api/rag-query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error(String(res.status));
-    const data = await res.json();
-    return {
-      answer: typeof data?.answer === "string" ? data.answer : mockAnswer(query),
-      clusters: Array.isArray(data?.retrievedClusters)
-        ? data.retrievedClusters
-        : [],
-      images: Array.isArray(data?.supportingImages) ? data.supportingImages : [],
-      live: true,
-    };
-  } catch {
-    return {
-      answer: mockAnswer(query),
-      clusters: [],
-      images: [],
-      live: false,
-    };
-  }
-}
 
 /* ── formatting helpers ── */
 
@@ -259,42 +205,14 @@ function Markdown({ text }: { text: string }) {
 
 export default function ChatInterface() {
   const [input, setInput] = useState("");
-  const [briefings, setBriefings] = useState<Briefing[]>([]);
+  const briefings = useBriefings();
   const listTopRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
 
   const busy = briefings.some((b) => b.status === "reading");
 
-  const file = async () => {
-    const text = input.trim();
-    if (!text || busy) return;
-
-    const entry: Briefing = {
-      id: Date.now(),
-      seq: briefings.length + 1,
-      query: text,
-      status: "reading",
-    };
-    setInput("");
-    setBriefings((prev) => [...prev, entry]);
-
-    // newest dossier appears at the top — bring it into view
-    requestAnimationFrame(() =>
-      listTopRef.current?.scrollIntoView({
-        behavior: reduce ? "auto" : "smooth",
-        block: "start",
-      })
-    );
-
-    const result = await fileQuery(text);
-
-    setBriefings((prev) =>
-      prev.map((b) =>
-        b.id === entry.id
-          ? { ...b, ...result, status: "done" }
-          : b
-      )
-    );
+  const file = () => {
+    if (fileQuery(input.trim())) setInput("");
   };
 
   return (
@@ -425,9 +343,17 @@ export default function ChatInterface() {
                         </p>
 
                         {/* verdict */}
-                        <div className="max-w-2xl text-base text-ink/90 md:text-lg">
-                          <Markdown text={b.answer ?? ""} />
-                        </div>
+                        {b.live ? (
+                          <div className="max-w-2xl text-base text-ink/90 md:text-lg">
+                            <Markdown text={b.answer ?? ""} />
+                          </div>
+                        ) : (
+                          <p className="max-w-2xl border border-line bg-paper-deep p-4 text-base text-ink/80">
+                            Couldn't reach the backend for this query — the
+                            pipeline may still be reading. Give it a moment
+                            and file it again.
+                          </p>
+                        )}
 
                         {/* measured evidence */}
                         {Boolean(b.clusters?.length) && (
@@ -490,7 +416,7 @@ function LiveTileImg({ src, idx }: { src: string; idx: number }) {
   return (
     <motion.img
       src={src}
-      alt={`Instagram post ${idx + 1} from the matched trend`}
+      alt={`Social media post ${idx + 1} from the matched trend`}
       loading="lazy"
       onLoad={(e) => {
         const img = e.currentTarget;

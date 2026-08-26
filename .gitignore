@@ -32,6 +32,9 @@ frontend/dist/
 frontend/.vite/
 frontend/.env
 
+# Project report
+project-report/
+
 # Dataset / embedding files
 *.npy
 *.parquet
