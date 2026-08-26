@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Menu, X, Asterisk } from "lucide-react";
@@ -19,9 +19,24 @@ export default function Navigation() {
   const health = useBackendHealth();
   const user = useAuthUser();
 
+  // opaque bar (so content never bleeds through) once the page is scrolled
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-50">
+      <header
+        className={`fixed inset-x-0 top-0 z-50 border-b transition-all duration-300 ${
+          scrolled || open
+            ? "border-line bg-paper/60 backdrop-blur-xl supports-[backdrop-filter]:bg-paper/40"
+            : "border-transparent bg-paper"
+        }`}
+      >
         <nav
           aria-label="Main navigation"
           className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 md:px-10"

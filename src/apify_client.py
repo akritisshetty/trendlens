@@ -178,6 +178,21 @@ def fetch_instagram_posts(
         raw = accounts_file.read_text().strip().splitlines()
         accounts = [a.strip() for a in raw if a.strip()]
 
+    # Speed/cost knobs (env-overridable):
+    #   TRENDLENS_MAX_ACCOUNTS       cap how many accounts are fetched
+    #   TRENDLENS_POSTS_PER_ACCOUNT  cap posts per account
+    import os
+
+    max_accounts = int(os.environ.get("TRENDLENS_MAX_ACCOUNTS", "0") or 0)
+    if max_accounts > 0:
+        accounts = accounts[:max_accounts]
+    try:
+        posts_per_account = int(
+            os.environ.get("TRENDLENS_POSTS_PER_ACCOUNT", str(posts_per_account))
+        )
+    except ValueError:
+        pass
+
     usernames = [_extract_username(a) for a in accounts]
 
     actor_input = {
@@ -187,7 +202,10 @@ def fetch_instagram_posts(
         "onlyPostsNewerThan": f"{days} days",
     }
 
-    print(f"[apify] starting instagram-post-scraper for {len(usernames)} accounts")
+    print(
+        f"[apify] starting instagram-post-scraper for {len(usernames)} accounts "
+        f"(max {posts_per_account} posts each)"
+    )
 
     resp = requests.post(
         f"{APIFY_BASE}/acts/{ACTOR_ID}/runs",

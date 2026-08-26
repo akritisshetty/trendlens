@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, Asterisk, CheckCircle2, LogOut } from "lucide-react";
 import PageTransition from "../components/navigation/PageTransition";
@@ -9,6 +9,9 @@ type FieldErrors = Partial<Record<"email" | "password" | "confirm", string>>;
 
 export default function Login() {
   const user = useAuthUser();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from ?? "/";
   const [mode, setMode] = useState<"signup" | "login">(() =>
     getUser() ? "login" : "signup"
   );
@@ -45,6 +48,8 @@ export default function Login() {
 
     if (result.ok) {
       setState("done");
+      // send users back to the page that asked them to log in
+      window.setTimeout(() => navigate(from, { replace: true }), 1200);
     } else {
       setFormError(result.error ?? "Something went wrong.");
       setState("idle");
@@ -91,10 +96,10 @@ export default function Login() {
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link
-                  to="/"
+                  to={from}
                   className="rounded-full border border-ink px-5 py-2.5 text-sm font-medium transition-colors hover:bg-ink hover:text-paper"
                 >
-                  Start exploring
+                  Continue
                 </Link>
                 <button
                   type="button"

@@ -16,15 +16,15 @@ const FAQS: Faq[] = [
   },
   {
     q: "Where do the rising themes come from?",
-    a: "Every post we fetch is clustered by what it looks like, and each theme's growth is measured against the previous window. The 'Rising right now' list on the home page shows exactly what the pipeline currently sees — no hand-picking.",
+    a: "Every post we fetch is clustered by what it looks like, and each theme's growth is measured against the previous window. The trend wall on the home page shows the actual posts — no hand-picking.",
   },
   {
     q: "How do I use the chat?",
-    a: 'Just ask in plain language: "What cafe aesthetic is rising this week?" or "Which visual styles get the most engagement?" You can also attach a photo — full image understanding is rolling out soon.',
+    a: 'Just ask in plain language: "What cafe aesthetic is rising this week?" or "Which visual styles get the most engagement?"',
   },
   {
-    q: "Can I share my own thoughts?",
-    a: "Please do. The thoughts section on the home page feeds straight into what we pay attention to. Spotted a weird recurring look at 2am? That's exactly the kind of signal we want.",
+    q: "How do I share feedback or an idea?",
+    a: "Use the “Reach out to us” section at the bottom of the home page. Whatever you write lands straight in our inbox — add your email if you'd like a reply.",
   },
   {
     q: "Are the numbers real?",
@@ -32,15 +32,24 @@ const FAQS: Faq[] = [
   },
 ];
 
-function FaqItem({ faq, index }: { faq: Faq; index: number }) {
-  const [open, setOpen] = useState(index === 0);
+function FaqItem({
+  faq,
+  index,
+  open,
+  onToggle,
+}: {
+  faq: Faq;
+  index: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const reduce = useReducedMotion();
 
   return (
     <div className="border-b border-line">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         aria-expanded={open}
         className="group flex w-full items-center justify-between gap-6 py-6 text-left"
       >
@@ -81,6 +90,9 @@ function FaqItem({ faq, index }: { faq: Faq; index: number }) {
 }
 
 export default function Help() {
+  // single-open accordion: opening one item closes the previously open one
+  const [openIndex, setOpenIndex] = useState<number>(0);
+
   return (
     <PageTransition>
       <div className="mx-auto max-w-4xl px-5 pb-28 pt-28 md:px-8 md:pt-40">
@@ -99,7 +111,13 @@ export default function Help() {
 
         <div className="mt-16 border-t border-line">
           {FAQS.map((faq, i) => (
-            <FaqItem key={faq.q} faq={faq} index={i} />
+            <FaqItem
+              key={faq.q}
+              faq={faq}
+              index={i}
+              open={openIndex === i}
+              onToggle={() => setOpenIndex(openIndex === i ? -1 : i)}
+            />
           ))}
         </div>
       </div>

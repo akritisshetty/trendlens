@@ -1,8 +1,7 @@
 import { useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
-import { ArrowRight, Paperclip, X } from "lucide-react";
-import type { LiveTile } from "../../services/liveTiles";
+import { ArrowRight } from "lucide-react";
 
 /* ────────────────────────────────────────────────────────────────
    The Briefing Desk — not a chatbot.
@@ -26,7 +25,6 @@ type Briefing = {
   id: number;
   seq: number;
   query: string;
-  hadAttachment: boolean;
   status: "reading" | "done";
   answer?: string;
   clusters?: EvidenceCluster[];
@@ -53,7 +51,7 @@ function mockAnswer(query: string): string {
 
 async function fileQuery(
   query: string
-): Promise<Omit<Briefing, "id" | "seq" | "query" | "hadAttachment" | "status">> {
+): Promise<Omit<Briefing, "id" | "seq" | "query" | "status">> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
@@ -261,28 +259,23 @@ function Markdown({ text }: { text: string }) {
 
 export default function ChatInterface() {
   const [input, setInput] = useState("");
-  const [attachment, setAttachment] = useState<string | null>(null);
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const listTopRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const reduce = useReducedMotion();
 
   const busy = briefings.some((b) => b.status === "reading");
 
   const file = async () => {
     const text = input.trim();
-    if ((!text && !attachment) || busy) return;
+    if (!text || busy) return;
 
     const entry: Briefing = {
       id: Date.now(),
       seq: briefings.length + 1,
-      query: attachment ? `${text}  ·  attached: ${attachment}` : text,
-      hadAttachment: Boolean(attachment),
+      query: text,
       status: "reading",
     };
     setInput("");
-    const hadAttachment = attachment;
-    setAttachment(null);
     setBriefings((prev) => [...prev, entry]);
 
     // newest dossier appears at the top — bring it into view
@@ -293,19 +286,7 @@ export default function ChatInterface() {
       })
     );
 
-    let result;
-    if (hadAttachment) {
-      await new Promise((r) => setTimeout(r, 1100));
-      result = {
-        answer:
-          "Image understanding arrives here soon. Meanwhile, describe the look in a few words — *latte art on a wooden table* — and file it again to check whether it matches any rising cluster.",
-        clusters: [],
-        images: [],
-        live: false,
-      };
-    } else {
-      result = await fileQuery(text);
-    }
+    const result = await fileQuery(text);
 
     setBriefings((prev) =>
       prev.map((b) =>
@@ -351,49 +332,15 @@ export default function ChatInterface() {
                 disabled={busy}
                 className="min-w-0 flex-1 bg-transparent font-display text-xl text-ink placeholder:text-ink/30 focus:outline-none disabled:opacity-40 md:text-3xl [caret-color:var(--color-accent)]"
               />
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) setAttachment(f.name);
-                  e.target.value = "";
-                }}
-                className="hidden"
-              />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                title="Attach reference photo"
-                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink sm:flex"
-              >
-                <Paperclip className="h-4 w-4" aria-hidden />
-                <span className="sr-only">Attach reference photo</span>
-              </button>
               <button
                 type="submit"
-                disabled={(!input.trim() && !attachment) || busy}
+                disabled={!input.trim() || busy}
                 aria-label="File query"
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink text-paper transition-transform enabled:hover:-translate-y-0.5 disabled:opacity-25"
               >
                 <ArrowRight className="h-5 w-5" aria-hidden />
               </button>
             </div>
-
-            {attachment && (
-              <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-accent-soft px-3 py-1 text-xs">
-                {attachment}
-                <button
-                  type="button"
-                  onClick={() => setAttachment(null)}
-                  aria-label="Remove attachment"
-                  className="text-accent"
-                >
-                  <X className="h-3 w-3" aria-hidden />
-                </button>
-              </p>
-            )}
 
             <div className="mt-4 flex flex-wrap gap-2">
               {SAMPLE_QUERIES.map((q) => (

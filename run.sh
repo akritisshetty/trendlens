@@ -8,7 +8,11 @@
 #   ./run.sh              # incremental pipeline (default), 10-day window
 #   ./run.sh 7            # incremental pipeline, 7-day window
 #   ./run.sh --baseline   # full re-cluster from scratch, 10-day window
-#   ./run.sh 7 --baseline # full re-cluster, 7-day window
+#   ./run.sh --fast       # SKIP data pipeline — start servers immediately on existing data
+#
+# Speed/cost knobs (put in .env):
+#   TRENDLENS_MAX_ACCOUNTS=15        # fetch fewer accounts (of 81)
+#   TRENDLENS_POSTS_PER_ACCOUNT=10   # default is 50 — biggest speed lever
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -16,10 +20,12 @@ cd "$(dirname "$0")"
 # ── Parse arguments ──────────────────────────────────────────────────────────
 DAYS=10
 BASELINE_FLAG=""
+FAST=0
 
 for arg in "$@"; do
   case "$arg" in
     --baseline) BASELINE_FLAG="--baseline" ;;
+    --fast)     FAST=1 ;;
     [0-9]*)     DAYS="$arg" ;;
     *)          echo "Unknown argument: $arg"; exit 1 ;;
   esac
@@ -62,16 +68,20 @@ fi
 [ -f .env ] || { warn ".env not found — copying from .env.example"; cp .env.example .env 2>/dev/null \
   || warn "No .env or .env.example — Instagram scraping will fail until APIFY_API_TOKEN is set."; }
 
-# ── Step 1: Run the data pipeline (non-fatal — existing data still works) ───
-if [ -n "$BASELINE_FLAG" ]; then
-  info "Running data BASELINE (${DAYS}-day window) — full re-cluster ..."
-  if ! python -m src.data_collector --days "$DAYS" --baseline; then
-    warn "Pipeline failed (Apify quota/payment or network?) — continuing with previously collected data."
-  fi
+# ── Step 1: Run the data pipeline (skipped with --fast; non-fatal otherwise) ─
+if [ "$FAST" -eq 1 ]; then
+  info "Skipping data pipeline (--fast) — using previously collected data."
 else
-  info "Running data pipeline INCREMENTAL (${DAYS}-day window) ..."
-  if ! python -m src.data_collector --days "$DAYS"; then
-    warn "Pipeline failed (Apify quota/payment or network?) — continuing with previously collected data."
+  if [ -n "$BASELINE_FLAG" ]; then
+    info "Running data BASELINE (${DAYS}-day window) — full re-cluster ..."
+    if ! python -m src.data_collector --days "$DAYS" --baseline; then
+      warn "Pipeline failed (Apify quota/payment or network?) — continuing with previously collected data."
+    fi
+  else
+    info "Running data pipeline INCREMENTAL (${DAYS}-day window) ..."
+    if ! python -m src.data_collector --days "$DAYS"; then
+      warn "Pipeline failed (Apify quota/payment or network?) — continuing with previously collected data."
+    fi
   fi
 fi
 echo

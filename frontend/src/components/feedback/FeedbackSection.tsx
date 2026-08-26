@@ -1,19 +1,30 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, AlertTriangle } from "lucide-react";
-import { getUser } from "../../lib/auth";
+import { Check, AlertTriangle, LogIn } from "lucide-react";
+import { getUser, useAuthUser } from "../../lib/auth";
 
 type SendState = "idle" | "sending" | "sent" | "failed";
+
+const DEVELOPERS = [
+  { name: "Akriti S Shetty", url: "https://www.linkedin.com/in/akritisshetty/" },
+  {
+    name: "Anora Andrea Dsouza",
+    url: "https://www.linkedin.com/in/anora-andrea-dsouza/",
+  },
+  { name: "Rakshitha", url: "https://www.linkedin.com/in/rakshitha-j017/" },
+  { name: "Shreshta D", url: "https://www.linkedin.com/in/shreshta-d/" },
+];
 
 /**
  * Feedback form — submissions are emailed to the project inbox by the
  * Python backend (POST /api/feedback). The recipient address lives only
  * in the server's .env and is never rendered in the UI.
+ * Login required: the sender's email comes from their account.
  */
 export default function FeedbackSection() {
+  const user = useAuthUser();
   const [value, setValue] = useState("");
-  // logged-in users: prefill their email so the reply can reach them
-  const [contact, setContact] = useState(() => getUser()?.email ?? "");
   const [state, setState] = useState<SendState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -29,15 +40,18 @@ export default function FeedbackSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: value.trim(),
-          contact: contact.trim(),
+          // reply-to = the logged-in account; never asked in the form
+          contact: getUser()?.email ?? "",
           source: "feedback",
         }),
         signal: controller.signal,
       });
       clearTimeout(timer);
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data?.status === "sent") setState("sent");
-      else {
+      if (res.ok && data?.status === "sent") {
+        setValue("");
+        setState("sent");
+      } else {
         setErrorMsg(data?.error || "Something went wrong sending your message.");
         setState("failed");
       }
@@ -52,24 +66,45 @@ export default function FeedbackSection() {
       aria-labelledby="feedback-heading"
       className="border-t border-line bg-ink py-20 text-paper md:py-28"
     >
-      <div className="grid gap-10 px-5 md:grid-cols-[1fr_auto] md:items-end md:px-10">
-        <div>
-          <h2
-            id="feedback-heading"
-            className="cropped-heading font-display text-[clamp(2rem,5vw,3.75rem)] font-bold"
-          >
-            Reach out to us
-          </h2>
-          <p className="mt-3 max-w-sm text-sm text-paper/60">
-            Broken thing? Brilliant idea? Weird trend you spotted at 2am?
-            Everything sent here goes straight to our inbox.
-          </p>
-        </div>
+      <div className="px-5 md:px-10">
+        <h2
+          id="feedback-heading"
+          className="cropped-heading font-display text-[clamp(2rem,5vw,3.75rem)] font-bold"
+        >
+          Reach out to us
+        </h2>
+        <p className="mt-3 max-w-sm text-sm text-paper/60">
+          Broken thing? Brilliant idea? Weird trend you spotted at 2am?
+          Everything sent here goes straight to our inbox.
+        </p>
       </div>
 
       <div className="mt-10 max-w-xl px-5 md:px-10">
         <AnimatePresence mode="wait">
-          {state === "sent" ? (
+          {!user ? (
+            <motion.div
+              key="locked"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="rounded-sm border border-paper/25 p-6"
+            >
+              <p className="font-display text-xl font-semibold">
+                One thing first — log in.
+              </p>
+              <p className="mt-2 max-w-md text-sm text-paper/60">
+                Reach out requires an account so we know who we're talking to
+                (and can write back). It takes one form.
+              </p>
+              <Link
+                to="/login"
+                className="mt-5 inline-flex items-center gap-2 rounded-full bg-paper px-6 py-3 text-sm font-medium text-ink transition-transform hover:-translate-y-0.5"
+              >
+                <LogIn className="h-4 w-4" aria-hidden />
+                Log in or sign up
+              </Link>
+            </motion.div>
+          ) : state === "sent" ? (
             <motion.p
               key="ok"
               role="status"
@@ -87,20 +122,8 @@ export default function FeedbackSection() {
               exit={{ opacity: 0, y: -8 }}
               className="space-y-3"
             >
-              <label htmlFor="feedback-contact" className="block text-[11px] uppercase tracking-[0.25em] text-paper/50">
-                Reply to
-              </label>
-              <input
-                id="feedback-contact"
-                type="email"
-                value={contact}
-                onChange={(e) => setContact(e.target.value)}
-                placeholder={getUser() ? undefined : "you@example.com"}
-                autoComplete="email"
-                className="w-full border border-paper/25 bg-transparent p-3 text-sm placeholder:text-paper/40 focus:border-paper focus:outline-none"
-              />
               <label htmlFor="feedback" className="sr-only">
-                Your feedback
+                Tell us anything
               </label>
               <textarea
                 id="feedback"
@@ -129,6 +152,26 @@ export default function FeedbackSection() {
             </motion.form>
           )}
         </AnimatePresence>
+      </div>
+
+      <div className="mt-16 px-5 text-center md:mt-20 md:px-10">
+        <p className="font-display text-sm font-semibold uppercase tracking-[0.18em] text-paper/60">
+          Built by
+        </p>
+        <ul className="mt-4 flex flex-wrap items-center justify-center gap-x-12 gap-y-3">
+          {DEVELOPERS.map((dev) => (
+            <li key={dev.url}>
+              <a
+                href={dev.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-paper underline-offset-4 transition-colors hover:text-accent focus-visible:text-accent active:text-accent hover:underline"
+              >
+                {dev.name}
+              </a>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   );
