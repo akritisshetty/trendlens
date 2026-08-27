@@ -404,7 +404,15 @@ def compute_temporal_trends(
     prior_days: int = 3,
 ) -> dict[int, dict[str, Any]]:
     """Compute daily post counts, growth rate, and emerging score per cluster."""
-    now = datetime.now(timezone.utc)
+    # Reference "now" from the data's own freshest post, falling back to the
+    # wall clock. This keeps recency meaningful even when the batch was
+    # ingested days ago (otherwise every cluster scores 0 "recent" posts).
+    if "timestamp" in df.columns and df["timestamp"].notna().any():
+        now = pd.Timestamp(df["timestamp"].max()).to_pydatetime()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = datetime.now(timezone.utc)
     recent_cutoff = now - timedelta(days=recent_days)
     prior_cutoff = now - timedelta(days=recent_days + prior_days)
 
@@ -551,7 +559,8 @@ def compute_hashtag_trends(
 
     for _, row in df.iterrows():
         tags = row.get("hashtags", [])
-        if not isinstance(tags, list):
+        # parquet round-trips store these as numpy arrays, not python lists
+        if not hasattr(tags, "__iter__") or isinstance(tags, (str, bytes)):
             continue
         post_id = row.get("post_id", "")
         cluster = row.get("cluster_id", -1)

@@ -45,7 +45,10 @@ def record(stage, method, metric, value, unit="", note=""):
                  value=round(value, 6) if isinstance(value, float) else value,
                  unit=unit, note=note)
     results.append(entry)
-    print(f"  [{method}] {metric}: {value:.4f} {unit}  {note}")
+    if isinstance(value, float):
+        print(f"  [{method}] {metric}: {value:.4f} {unit}  {note}")
+    else:
+        print(f"  [{method}] {metric}: {value} {unit}  {note}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -74,6 +77,20 @@ import sys
 sys.path.insert(0, str(ROOT))
 import config
 from src.clustering import reduce_dimensions, run_hdbscan, cluster_report, _silhouette_score
+
+# A deterministic UMAP-10d reduction shared by all stages (the TrendLens
+# default reduction). min_cluster_size=50 is far too large for 152 samples
+# (it collapsed everything to noise), so the reference HDBSCAN run uses a
+# parameterisation that actually resolves the structure at this dataset size.
+import umap as umap_mod
+UMAP_REF = umap_mod.UMAP(
+    n_components=10, metric="cosine", n_neighbors=15, min_dist=0.0,
+    random_state=42,
+).fit_transform(emb)
+labels_gt, probs_gt, _ = run_hdbscan(
+    UMAP_REF, min_cluster_size=10, min_samples=5,
+    cluster_selection_method="eom",
+)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -162,23 +179,27 @@ except Exception as e:
 
 # --- ResNet50 (torchvision features) ---
 try:
-    from torchvision import transforms, models
+    from torchvision import transforms as T, models
     resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1).to(DEVICE).eval()
     resnet_feat = torch.nn.Sequential(*list(resnet.children())[:-1])  # remove FC
-    resnet_transform = transforms.Compose([
-        transforms.Resize(256), transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    resnet_transform = T.Compose([
+        T.Resize(256), T.CenterCrop(224),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
+
+    def _resnet_prep(img):
+        return resnet_transform(img.convert("RGB"))
+
     t0 = time.perf_counter()
-    batch = torch.stack([resnet_transform(img) for img in pil_images]).to(DEVICE)
+    batch = torch.stack([_resnet_prep(img) for img in pil_images]).to(DEVICE)
     with torch.no_grad():
         feats_resnet = resnet_feat(batch).squeeze(-1).squeeze(-1)
     elapsed = time.perf_counter() - t0
     imgs_per_sec = len(pil_images) / elapsed
     t0 = time.perf_counter()
     with torch.no_grad():
-        inp = resnet_transform(pil_images[:1]).unsqueeze(0).to(DEVICE)
+        inp = _resnet_prep(pil_images[0]).unsqueeze(0).to(DEVICE)
         resnet_feat(inp)
     single_lat = (time.perf_counter() - t0) * 1000
     record("Embedding", "ResNet50", "throughput", round(imgs_per_sec, 1), "img/s")
@@ -192,23 +213,38 @@ except Exception as e:
     feats_resnet = None
 
 # --- Embedding quality: intra-cluster coherence on known clusters ---
-# Use the HDBSCAN labels on CLIP as ground truth for comparison
+# Compare every embedding model on the SAME labelled posts so the index
+# spaces line up (the earlier benchmark used a 50-image sample that did not
+# share indices with the 152-post ground truth — that made the metric
+# meaningless). We embed the local images of the labelled posts under each
+# model and measure how coherent each model's clusters are.
 from sklearn.metrics.pairwise import cosine_similarity
-labels_gt, _, _ = run_hdbscan(
-    emb, min_cluster_size=50, min_samples=10, cluster_selection_method="eom"
-)
-mask = labels_gt >= 0
 
-def embedding_coherence(feats, labels, mask, sample_n=200):
+# row index (in emb) -> local image path, for labelled posts with a file
+meta = pd.read_parquet(str(META_PATH))
+row_path = {}
+for row_idx, pid in enumerate(meta["post_id"].astype(str)):
+    if labels_gt[row_idx] < 0:
+        continue
+    cand = IMG_DIR / f"{pid}.jpg"
+    if cand.is_file():
+        row_path[row_idx] = cand
+label_rows = sorted(row_path.keys())
+sel_labels = labels_gt[label_rows]
+print(f"  Coherence evaluated on {len(label_rows)} labelled posts "
+      f"({len(np.unique(sel_labels))} clusters)")
+
+def coherence_mapstar(_pil):
+    """Loads images, returns PIL list."""
+    imgs = [Image.open(row_path[r]).convert("RGB") for r in label_rows]
+    return imgs
+
+def embedding_coherence(feats, labels):
     """Average intra-cluster cosine similarity — higher = better."""
-    rng = np.random.default_rng(42)
-    valid = np.where(mask)[0]
-    if len(valid) > sample_n:
-        valid = rng.choice(valid, sample_n, replace=False)
+    feats = feats / (np.linalg.norm(feats, axis=1, keepdims=True) + 1e-9)
     sims = []
-    for c in np.unique(labels[mask]):
-        idx = np.where((labels == c) & mask)[0]
-        idx = idx[np.isin(idx, valid)]
+    for c in np.unique(labels):
+        idx = np.where(labels == c)[0]
         if len(idx) < 2:
             continue
         sub = feats[idx]
@@ -217,27 +253,62 @@ def embedding_coherence(feats, labels, mask, sample_n=200):
         sims.append(cos.sum() / (len(idx) * (len(idx) - 1)))
     return float(np.mean(sims)) if sims else 0.0
 
-# Normalize all embeddings
-emb_norm = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-9)
-feats_clip_b_norm = feats_clip_b / (np.linalg.norm(feats_clip_b, axis=1, keepdims=True) + 1e-9)
+# CLIP ViT-B/32 (TrendLens) — use the precomputed 152-d embeddings
 record("Embedding", "CLIP ViT-B/32 (ours)", "intra_cluster_coherence",
-       round(embedding_coherence(emb_norm, labels_gt, mask), 4), "cosine",
-       "on real CLIP embeddings")
+       round(embedding_coherence(emb[label_rows], sel_labels), 4), "cosine",
+       f"on {len(label_rows)} labelled real posts")
+
+coherence_images = coherence_mapstar(None)
 
 if feats_clip_l is not None:
-    fl = feats_clip_l / (np.linalg.norm(feats_clip_l, axis=1, keepdims=True) + 1e-9)
+    # model was unloaded after the benchmark — reload for the coherence pass
+    proc = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
+    proc.image_processor.size = {"height": 224, "width": 224}
+    clip_l = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to(DEVICE).eval()
+    with torch.no_grad():
+        inp = proc(images=coherence_images, return_tensors="pt").to(DEVICE)
+        out = clip_l.get_image_features(**inp)
+    _o = out if isinstance(out, torch.Tensor) else (
+        out.pooler_output if hasattr(out, "pooler_output")
+        else out.last_hidden_state[:, 0, :])
+    fl = _o.float().cpu().numpy()
     record("Embedding", "CLIP ViT-L/14", "intra_cluster_coherence",
-           round(embedding_coherence(fl, labels_gt, mask), 4), "cosine")
+           round(embedding_coherence(fl, sel_labels), 4), "cosine")
+    del clip_l; gc.collect()
+    if DEVICE == "cuda": torch.cuda.empty_cache()
 
 if feats_dino is not None:
-    fd = feats_dino / (np.linalg.norm(feats_dino, axis=1, keepdims=True) + 1e-9)
+    from transformers import AutoImageProcessor, AutoModel
+    dp = AutoImageProcessor.from_pretrained("facebook/dinov2-base")
+    dm = AutoModel.from_pretrained("facebook/dinov2-base").to(DEVICE).eval()
+    with torch.no_grad():
+        inp = dp(images=coherence_images, return_tensors="pt").to(DEVICE)
+        out = dm(**inp)
+        fd = out.last_hidden_state[:, 0, :].float().cpu().numpy()
     record("Embedding", "DINOv2 ViT-B/14", "intra_cluster_coherence",
-           round(embedding_coherence(fd, labels_gt, mask), 4), "cosine")
+           round(embedding_coherence(fd, sel_labels), 4), "cosine")
+    del dm; gc.collect()
+    if DEVICE == "cuda": torch.cuda.empty_cache()
 
 if feats_resnet is not None:
-    fr = feats_resnet / (np.linalg.norm(feats_resnet, axis=1, keepdims=True) + 1e-9)
+    from torchvision import transforms as T, models
+    _rn = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1).to(DEVICE).eval()
+    _rn_feat = torch.nn.Sequential(*list(_rn.children())[:-1])
+    _rn_tf = T.Compose([
+        T.Resize(256), T.CenterCrop(224), T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+    def _rn_prep(img):
+        return _rn_tf(img.convert("RGB"))
+
+    batch = torch.stack([_rn_prep(img) for img in coherence_images]).to(DEVICE)
+    with torch.no_grad():
+        fr = _rn_feat(batch).squeeze(-1).squeeze(-1).float().cpu().numpy()
     record("Embedding", "ResNet50", "intra_cluster_coherence",
-           round(embedding_coherence(fr, labels_gt, mask), 4), "cosine")
+           round(embedding_coherence(fr, sel_labels), 4), "cosine")
+    del _rn, _rn_feat; gc.collect()
+    if DEVICE == "cuda": torch.cuda.empty_cache()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -267,8 +338,8 @@ for name, fn in reducers.items():
     reduced_embs[name] = reduced
     record("DimReduction", name, "time", round(elapsed, 2), "s", f"{emb.shape[1]}d -> {reduced.shape[1]}d")
 
-    # HDBSCAN on reduced embeddings
-    cl = run_hdbscan(reduced, min_cluster_size=50, min_samples=10, cluster_selection_method="eom")
+    # HDBSCAN on reduced embeddings (workable params for this dataset size)
+    cl = run_hdbscan(reduced, min_cluster_size=10, min_samples=5, cluster_selection_method="eom")
     labels_r = cl[0]
     mask_r = labels_r >= 0
     n_clusters = int(labels_r.max() + 1) if labels_r.max() >= 0 else 0
@@ -305,7 +376,7 @@ from sklearn.metrics import silhouette_score
 emb_umap = reduced_embs.get("UMAP (ours)")
 
 clusterers = {
-    "HDBSCAN (ours)": lambda e: run_hdbscan(e, min_cluster_size=50, min_samples=10, cluster_selection_method="eom"),
+    "HDBSCAN (ours)": lambda e: run_hdbscan(e, min_cluster_size=10, min_samples=5, cluster_selection_method="eom")[0],
     "KMeans (k=4)": lambda e: KMeans(n_clusters=4, random_state=42, n_init=10).fit(e),
     "KMeans (k=5)": lambda e: KMeans(n_clusters=5, random_state=42, n_init=10).fit(e),
     "KMeans (k=8)": lambda e: KMeans(n_clusters=8, random_state=42, n_init=10).fit(e),
@@ -629,6 +700,7 @@ record("Pipeline", "HDBSCAN", "time", round(hdbscan_time, 2), "s")
 # Trend computation time
 t0 = time.time()
 meta_pipe = meta.copy()
+meta_pipe["user_id"] = meta_pipe.get("author", pd.Series(index=meta_pipe.index)).astype(str)
 meta_pipe["cluster_id"] = labels_pipe
 meta_pipe = meta_pipe[meta_pipe["cluster_id"] >= 0].copy()
 agg_pipe = aggregate_cluster_trends(meta_pipe, period="W")

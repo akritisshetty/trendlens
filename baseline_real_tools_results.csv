@@ -1,0 +1,7 @@
+name,metric,value,note
+TrendLens (visual clusters),group_value_cohesion,0.556011,
+Engagement trending list,group_value_cohesion,0.510131,quartile bins (upper bound)
+Hashtag-frequency detection,group_value_cohesion,0.686534,top-40 tags
+Keyword/Google-Trends-style,group_value_cohesion,0.473905,top-40 keywords
+TrendLens text-diversity,mean_hashtag_jaccard,0.023723,within-cluster mean pairwise hashtag overlap (low = no shared name)
+TrendLens text-diversity,mean_keyword_jaccard,0.029505,within-cluster mean pairwise keyword overlap (low = no shared name)

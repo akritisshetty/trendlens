@@ -1,0 +1,145 @@
+stage,method,metric,value,unit,note
+Embedding,CLIP ViT-B/32 (ours),throughput,10.5,img/s,
+Embedding,CLIP ViT-B/32 (ours),dim,512,dims,
+Embedding,CLIP ViT-B/32 (ours),single_latency,165.0,ms,
+Embedding,CLIP ViT-L/14,throughput,0.5,img/s,
+Embedding,CLIP ViT-L/14,dim,768,dims,
+Embedding,CLIP ViT-L/14,single_latency,2115.4,ms,
+Embedding,DINOv2 ViT-B/14,throughput,1.8,img/s,
+Embedding,DINOv2 ViT-B/14,dim,768,dims,
+Embedding,DINOv2 ViT-B/14,single_latency,491.0,ms,
+Embedding,ResNet50,throughput,5.5,img/s,
+Embedding,ResNet50,dim,2048,dims,
+Embedding,ResNet50,single_latency,234.8,ms,
+Embedding,CLIP ViT-B/32 (ours),intra_cluster_coherence,0.4957,cosine,on 134 labelled real posts
+Embedding,CLIP ViT-L/14,intra_cluster_coherence,0.4636,cosine,
+Embedding,DINOv2 ViT-B/14,intra_cluster_coherence,0.0837,cosine,
+Embedding,ResNet50,intra_cluster_coherence,0.6361,cosine,
+DimReduction,UMAP (ours),time,0.52,s,512d -> 10d
+DimReduction,UMAP (ours),n_clusters,3,,
+DimReduction,UMAP (ours),noise_pct,0.1053,,
+DimReduction,UMAP (ours),silhouette,0.5793,,excl noise
+DimReduction,UMAP (ours),ARI,1.0,,vs HDBSCAN ground truth
+DimReduction,UMAP (ours),NMI,1.0,,vs HDBSCAN ground truth
+DimReduction,UMAP (ours),V-measure,1.0,,
+DimReduction,PCA,time,0.01,s,512d -> 10d
+DimReduction,PCA,n_clusters,2,,
+DimReduction,PCA,noise_pct,0.5066,,
+DimReduction,PCA,silhouette,0.3174,,excl noise
+DimReduction,PCA,ARI,0.2123,,vs HDBSCAN ground truth
+DimReduction,PCA,NMI,0.3042,,vs HDBSCAN ground truth
+DimReduction,PCA,V-measure,0.3042,,
+DimReduction,t-SNE,time,1.03,s,512d -> 2d
+DimReduction,t-SNE,n_clusters,2,,
+DimReduction,t-SNE,noise_pct,0.6316,,
+DimReduction,t-SNE,silhouette,0.6068,,excl noise
+DimReduction,t-SNE,ARI,0.1806,,vs HDBSCAN ground truth
+DimReduction,t-SNE,NMI,0.3859,,vs HDBSCAN ground truth
+DimReduction,t-SNE,V-measure,0.3859,,
+Clustering,HDBSCAN (ours),time,0.009,s,
+Clustering,HDBSCAN (ours),n_clusters,3,,
+Clustering,HDBSCAN (ours),noise_pct,0.1053,,
+Clustering,HDBSCAN (ours),silhouette,0.5793,,excl noise
+Clustering,HDBSCAN (ours),ARI,1.0,,
+Clustering,HDBSCAN (ours),NMI,1.0,,
+Clustering,HDBSCAN (ours),V-measure,1.0,,
+Clustering,HDBSCAN (ours),balance_ratio,0.5536,,min/max cluster size
+Clustering,KMeans (k=4),time,0.075,s,
+Clustering,KMeans (k=4),n_clusters,4,,
+Clustering,KMeans (k=4),noise_pct,0.0,,
+Clustering,KMeans (k=4),silhouette,0.4769,,excl noise
+Clustering,KMeans (k=4),ARI,0.7014,,
+Clustering,KMeans (k=4),NMI,0.7309,,
+Clustering,KMeans (k=4),V-measure,0.7309,,
+Clustering,KMeans (k=4),balance_ratio,0.5,,min/max cluster size
+Clustering,KMeans (k=5),time,0.025,s,
+Clustering,KMeans (k=5),n_clusters,5,,
+Clustering,KMeans (k=5),noise_pct,0.0,,
+Clustering,KMeans (k=5),silhouette,0.4171,,excl noise
+Clustering,KMeans (k=5),ARI,0.5941,,
+Clustering,KMeans (k=5),NMI,0.6819,,
+Clustering,KMeans (k=5),V-measure,0.6819,,
+Clustering,KMeans (k=5),balance_ratio,0.3333,,min/max cluster size
+Clustering,KMeans (k=8),time,0.04,s,
+Clustering,KMeans (k=8),n_clusters,8,,
+Clustering,KMeans (k=8),noise_pct,0.0,,
+Clustering,KMeans (k=8),silhouette,0.3748,,excl noise
+Clustering,KMeans (k=8),ARI,0.4585,,
+Clustering,KMeans (k=8),NMI,0.6374,,
+Clustering,KMeans (k=8),V-measure,0.6374,,
+Clustering,KMeans (k=8),balance_ratio,0.3,,min/max cluster size
+Clustering,DBSCAN (eps=0.5),time,0.005,s,
+Clustering,DBSCAN (eps=0.5),n_clusters,6,,
+Clustering,DBSCAN (eps=0.5),noise_pct,0.1382,,
+Clustering,DBSCAN (eps=0.5),silhouette,0.3628,,excl noise
+Clustering,DBSCAN (eps=0.5),ARI,0.6983,,
+Clustering,DBSCAN (eps=0.5),NMI,0.7312,,
+Clustering,DBSCAN (eps=0.5),V-measure,0.7312,,
+Clustering,DBSCAN (eps=0.5),balance_ratio,0.102,,min/max cluster size
+Clustering,DBSCAN (eps=1.0),time,0.003,s,
+Clustering,DBSCAN (eps=1.0),n_clusters,1,,
+Clustering,DBSCAN (eps=1.0),noise_pct,0.0,,
+Clustering,DBSCAN (eps=1.0),silhouette,N/A,,
+Clustering,DBSCAN (eps=1.0),balance_ratio,1.0,,min/max cluster size
+Clustering,Agglomerative (k=4),time,0.004,s,
+Clustering,Agglomerative (k=4),n_clusters,4,,
+Clustering,Agglomerative (k=4),noise_pct,0.0,,
+Clustering,Agglomerative (k=4),silhouette,0.4704,,excl noise
+Clustering,Agglomerative (k=4),ARI,0.6966,,
+Clustering,Agglomerative (k=4),NMI,0.731,,
+Clustering,Agglomerative (k=4),V-measure,0.731,,
+Clustering,Agglomerative (k=4),balance_ratio,0.5882,,min/max cluster size
+Trend,TrendLens (ours),spearman_engagement,0.5,,correlation with avg engagement
+Trend,TrendLens (ours),spearman_vs_trendlens,1.0,,agreement with TrendLens ranking
+Trend,TrendLens (ours),precision@2,0.5,,above-median engagement
+Trend,TrendLens (ours),precision@3,0.3333,,above-median engagement
+Trend,Simple growth,spearman_engagement,-0.866,,correlation with avg engagement
+Trend,Simple growth,spearman_vs_trendlens,-0.866,,agreement with TrendLens ranking
+Trend,Simple growth,precision@2,0.0,,above-median engagement
+Trend,Simple growth,precision@3,0.3333,,above-median engagement
+Trend,MA slope,spearman_engagement,-0.5,,correlation with avg engagement
+Trend,MA slope,spearman_vs_trendlens,0.5,,agreement with TrendLens ranking
+Trend,MA slope,precision@2,0.0,,above-median engagement
+Trend,MA slope,precision@3,0.3333,,above-median engagement
+Trend,Linear slope,spearman_engagement,-0.5,,correlation with avg engagement
+Trend,Linear slope,spearman_vs_trendlens,0.5,,agreement with TrendLens ranking
+Trend,Linear slope,precision@2,0.0,,above-median engagement
+Trend,Linear slope,precision@3,0.3333,,above-median engagement
+Trend,Exp. weighted growth,spearman_engagement,-0.5,,correlation with avg engagement
+Trend,Exp. weighted growth,spearman_vs_trendlens,-1.0,,agreement with TrendLens ranking
+Trend,Exp. weighted growth,precision@2,0.5,,above-median engagement
+Trend,Exp. weighted growth,precision@3,0.3333,,above-median engagement
+Trend,Text tags baseline,spearman_engagement,-0.866,,hashtag frequency growth
+Trend,Text tags baseline,spearman_vs_trendlens,-0.866,,
+Retrieval,MiniLM-L6-v2 (ours),dim,384,dims,
+Retrieval,MiniLM-L6-v2 (ours),corpus_size,4,,
+Retrieval,MiniLM-L6-v2 (ours),precision@1,0.75,,k=1
+Retrieval,MiniLM-L6-v2 (ours),recall@1,0.2812,,k=1
+Retrieval,MiniLM-L6-v2 (ours),hit@1,0.75,,k=1
+Retrieval,MiniLM-L6-v2 (ours),precision@3,0.7083,,k=3
+Retrieval,MiniLM-L6-v2 (ours),recall@3,0.7812,,k=3
+Retrieval,MiniLM-L6-v2 (ours),hit@3,1.0,,k=3
+Retrieval,MiniLM-L6-v2 (ours),MRR,0.875,,
+Retrieval,all-mpnet-base-v2,dim,768,dims,
+Retrieval,all-mpnet-base-v2,corpus_size,4,,
+Retrieval,all-mpnet-base-v2,precision@1,0.375,,k=1
+Retrieval,all-mpnet-base-v2,recall@1,0.1146,,k=1
+Retrieval,all-mpnet-base-v2,hit@1,0.375,,k=1
+Retrieval,all-mpnet-base-v2,precision@3,0.625,,k=3
+Retrieval,all-mpnet-base-v2,recall@3,0.6771,,k=3
+Retrieval,all-mpnet-base-v2,hit@3,1.0,,k=3
+Retrieval,all-mpnet-base-v2,MRR,0.6458,,
+Retrieval,MiniLM-L12-v2,dim,384,dims,
+Retrieval,MiniLM-L12-v2,corpus_size,4,,
+Retrieval,MiniLM-L12-v2,precision@1,0.375,,k=1
+Retrieval,MiniLM-L12-v2,recall@1,0.1146,,k=1
+Retrieval,MiniLM-L12-v2,hit@1,0.375,,k=1
+Retrieval,MiniLM-L12-v2,precision@3,0.6667,,k=3
+Retrieval,MiniLM-L12-v2,recall@3,0.7396,,k=3
+Retrieval,MiniLM-L12-v2,hit@3,1.0,,k=3
+Retrieval,MiniLM-L12-v2,MRR,0.6667,,
+Pipeline,CLIP embedding,time_per_image,210.0,ms,
+Pipeline,UMAP 10d,time,0.43,s,152 samples
+Pipeline,HDBSCAN,time,0.01,s,
+Pipeline,Trend scoring,time,0.05,s,
+Pipeline,Total (UMAP+HDBSCAN+trends),time,0.48,s,

@@ -51,6 +51,16 @@ def aggregate_cluster_trends(
     eng = out[likes_col].fillna(0) + out[comments_col].fillna(0)
     out["_eng"] = eng
 
+    # Robust user column: callers may pass Instagram metadata that has
+    # ``author`` instead of ``user_id``. Fall back gracefully rather than crash.
+    if user_col not in out.columns:
+        for candidate in ("author", "full_name", "owner_id"):
+            if candidate in out.columns:
+                user_col = candidate
+                break
+        else:
+            out[user_col] = "anonymous"
+
     g = out.groupby([cluster_col, "period"])
     agg = (
         g.size()
