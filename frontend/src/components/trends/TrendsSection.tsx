@@ -5,6 +5,10 @@ import { fetchLiveTiles } from "../../services/liveTiles";
 
 const MIN_LIVE_TILES = 3;
 
+// How often the live wall re-fetches a fresh random slice of Instagram
+// images from the backend (in ms).
+const REFRESH_MS = 60_000;
+
 export default function TrendsSection() {
   // Placeholder wall renders instantly; swapped for the real Instagram
   // feed once /api/instagram-tiles responds.
@@ -13,13 +17,20 @@ export default function TrendsSection() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchLiveTiles().then((tiles) => {
-      if (cancelled || tiles.length < MIN_LIVE_TILES) return;
-      setRows(buildRowsFromLiveTiles(tiles));
-      setIsLive(true);
-    });
+
+    const load = () =>
+      fetchLiveTiles().then((tiles) => {
+        if (cancelled || tiles.length < MIN_LIVE_TILES) return;
+        setRows(buildRowsFromLiveTiles(tiles));
+        setIsLive(true);
+      });
+
+    load();
+    const timer = setInterval(load, REFRESH_MS);
+
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, []);
 

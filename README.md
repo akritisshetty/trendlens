@@ -244,6 +244,47 @@ See `benchmark_algorithms.py` and `benchmark_clip_sizes.py` for benchmark script
 
 ---
 
+## Evaluation Metrics
+
+System-wide evaluation metrics computed via `evaluate_system.py`:
+
+### Clustering Quality
+| Metric | HDBSCAN | KMeans (baseline) |
+|--------|---------|-------------------|
+| Silhouette Score | 0.8255 | 0.8255 |
+| Adjusted Rand Index | 1.0000 | 1.0000 |
+| Normalized Mutual Info | 1.0000 | 1.0000 |
+| Homogeneity | 1.0000 | — |
+| Completeness | 1.0000 | — |
+| V-Measure | 1.0000 | — |
+
+### Scope Gate Classification (In-Scope vs Out-of-Scope)
+| Metric | Value |
+|--------|-------|
+| Accuracy | 0.8636 |
+| Precision (In-Scope) | 0.8000 |
+| Recall (In-Scope) | 1.0000 |
+| F1-Score (In-Scope) | 0.8889 |
+| Specificity | 0.7000 |
+
+### RAG Retrieval
+| Metric | k=1 | k=3 | k=5 |
+|--------|-----|-----|-----|
+| Precision | 0.5000 | 0.3333 | 0.3750 |
+| Recall | 0.1875 | 0.3542 | 0.6667 |
+| F1-Score | 0.2708 | 0.3417 | 0.4777 |
+| Hit Rate | 0.5000 | 0.7500 | 1.0000 |
+| **MRR** | | | **0.6812** |
+
+### Lifecycle Classification
+| Class | Precision | Recall | F1 |
+|-------|-----------|--------|----|
+| Rising | 1.00 | 1.00 | 1.00 |
+| Stable | 1.00 | 1.00 | 1.00 |
+| Declining | 1.00 | 1.00 | 1.00 |
+
+---
+
 ## Cluster Tracker (Vector Drift Prevention)
 
 Traditional re-clustering from scratch breaks time-series history — cluster IDs shuffle every run. The Cluster Tracker solves this:

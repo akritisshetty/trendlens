@@ -479,13 +479,21 @@ def handle_instagram_tiles(limit: int = 24) -> dict[str, Any]:
     meta = _load_post_meta()
 
     exts = {".jpg", ".jpeg", ".png", ".webp"}
-    files = sorted(
+    files = [
         p for p in img_dir.iterdir()
         if p.is_file() and p.suffix.lower() in exts
-    )
+    ]
+
+    import random as _random
+
+    # Shuffle from the full DB so the live wall shows a fresh, rotating
+    # slice of collected Instagram images on every request.
+    _random.shuffle(files)
+    if len(files) > limit:
+        files = files[:limit]
 
     tiles: list[dict[str, Any]] = []
-    for path in files[:limit]:
+    for path in files:
         info = meta.get(path.stem) or {}
         caption_title = _caption_title(info.get("caption"))
         author = str(info.get("author") or "").strip()

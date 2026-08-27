@@ -89,7 +89,7 @@ export default function Login() {
               <p className="mt-3 text-ink-soft">
                 Logged in as{" "}
                 <span className="font-medium text-ink">
-                  {(user ?? { email: "" }).email}
+                  {(user?.name) || (user ?? { email: "" }).email}
                 </span>
                 . Thought and feedback forms will send with your address, so we
                 can reply.

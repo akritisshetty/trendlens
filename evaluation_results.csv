@@ -1,0 +1,44 @@
+section,metric,value,unit,note
+Clustering,n_samples,500.0,samples,synthetic 512-dim
+Clustering,n_ground_truth_clusters,5.0,clusters,
+Clustering,hdbscan_clusters_found,5.0,clusters,
+Clustering,hdbscan_noise_points,0.0,points,0.0%
+Clustering,silhouette_score,0.8255,,"excluding noise, euclidean"
+Clustering,adjusted_rand_index,1.0,,vs ground truth
+Clustering,normalized_mutual_info,1.0,,vs ground truth
+Clustering,homogeneity,1.0,,
+Clustering,completeness,1.0,,
+Clustering,v_measure,1.0,,
+Clustering,kmeans_silhouette,0.8255,,KMeans baseline
+Clustering,kmeans_ari,1.0,,KMeans baseline
+Clustering,kmeans_nmi,1.0,,KMeans baseline
+Scope Gate,accuracy,0.8636,,n=22 queries
+Scope Gate,precision,0.8,,in-scope class
+Scope Gate,recall,1.0,,in-scope class
+Scope Gate,f1_score,0.8889,,in-scope class
+Scope Gate,true_negatives,7.0,,correctly rejected
+Scope Gate,false_positives,3.0,,passed but should reject
+Scope Gate,false_negatives,0.0,,rejected but should pass
+Scope Gate,true_positives,12.0,,correctly passed
+Scope Gate,specificity,0.7,,TN/(TN+FP)
+Scope Gate,false_positive_rate,0.3,,FP/(FP+TN)
+RAG Retrieval,corpus_size,15.0,documents,
+RAG Retrieval,embedding_dim,384.0,dims,
+RAG Retrieval,n_eval_queries,8.0,queries,
+RAG Retrieval,precision@1,0.5,,k=1
+RAG Retrieval,recall@1,0.1875,,k=1
+RAG Retrieval,f1@1,0.2708,,k=1
+RAG Retrieval,hit@1,0.5,,k=1
+RAG Retrieval,precision@3,0.3333,,k=3
+RAG Retrieval,recall@3,0.3542,,k=3
+RAG Retrieval,f1@3,0.3417,,k=3
+RAG Retrieval,hit@3,0.75,,k=3
+RAG Retrieval,precision@5,0.375,,k=5
+RAG Retrieval,recall@5,0.6667,,k=5
+RAG Retrieval,f1@5,0.4777,,k=5
+RAG Retrieval,hit@5,1.0,,k=5
+RAG Retrieval,mrr,0.6812,,Mean Reciprocal Rank
+Lifecycle,accuracy,1.0,,n=20 clusters
+Lifecycle,precision_weighted,1.0,,weighted avg
+Lifecycle,recall_weighted,1.0,,weighted avg
+Lifecycle,f1_weighted,1.0,,weighted avg

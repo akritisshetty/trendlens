@@ -87,7 +87,7 @@ export default function Navigation() {
                 to="/login"
                 className="ml-2 block rounded-full border border-ink px-4 py-2 text-sm font-medium transition-colors hover:bg-ink hover:text-paper"
               >
-                {user ? user.email.split("@")[0] : "Log in"}
+                {user ? (user.name || user.email.split("@")[0]) : "Log in"}
               </NavLink>
             </li>
             <li
