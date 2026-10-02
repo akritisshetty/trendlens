@@ -272,3 +272,99 @@ class TestRunQuery:
             assert "brand new this window" in res["answer"]
             assert "GEMINI WROTE THIS WHOLE THING" not in res["answer"]
             mock_llm.assert_not_called()
+
+
+class TestTopicGating:
+    """The fallback formatter must answer the question that was asked.
+
+    Regression cover for a concrete failure: asked "What makeup looks are
+    trending on social media?" the formatter replied with fried chicken and
+    latte art, because it only filtered on a preposition ("...about X") and
+    that question has none.
+    """
+
+    def _trends(self):
+        return {
+            "themes": [
+                {"name": "good fried chicken", "keywords": ["fried", "chicken"],
+                 "blip_caption": "fried chicken on a plate", "emerging_score": 0.9,
+                 "style_tags": []},
+                {"name": "manual latte art", "keywords": ["latte", "coffee"],
+                 "blip_caption": "latte art in a cup", "emerging_score": 0.8,
+                 "style_tags": []},
+                {"name": "povbeauty coming sephora",
+                 "keywords": ["povbeauty", "sephora", "lipstick"],
+                 "blip_caption": "close up of a made up face with lipstick",
+                 "emerging_score": 0.1, "style_tags": []},
+            ]
+        }
+
+    def test_makeup_question_excludes_food(self):
+        out = rag.format_instagram_trends_answer(
+            "What makeup looks are trending on social media?", self._trends()
+        )
+        assert "povbeauty" in out
+        assert "fried chicken" not in out
+        assert "latte art" not in out
+
+    def test_question_with_no_subject_is_unfiltered(self):
+        out = rag.format_instagram_trends_answer(
+            "what is trending right now", self._trends()
+        )
+        assert "fried chicken" in out
+        assert "latte art" in out
+
+    def test_uncovered_topic_refuses_instead_of_guessing(self):
+        out = rag.format_instagram_trends_answer(
+            "what car photography trends are rising", self._trends()
+        )
+        assert "No theme in the current scrape covers" in out
+        assert "fried chicken" not in out
+
+    def test_cluster_names_are_matched_as_substrings(self):
+        topics, _ = rag._query_topics("what makeup looks are trending?")
+        assert topics == {"makeup and beauty"}
+        assert rag._theme_matches(
+            {"name": "povbeauty coming sephora", "keywords": ["povbeauty"]},
+            topics, set(),
+        )
+
+    def test_caption_repetition_is_collapsed(self):
+        raw = "plate of bread topped with a sp of dil dil dil dil"
+        assert "dil dil dil" not in rag._clean_caption_cue(raw)
+
+    def test_chunk_filter_drops_off_topic_but_never_empties(self):
+        chunks = [
+            {"name": "povbeauty coming sephora", "keywords": ["sephora"]},
+            {"name": "good fried chicken", "keywords": ["chicken"]},
+        ]
+        kept = rag._filter_chunks_by_topic("what makeup looks are trending?", chunks)
+        assert [c["name"] for c in kept] == ["povbeauty coming sephora"]
+        # No match at all -> unfiltered beats empty
+        assert rag._filter_chunks_by_topic("what car trends are rising", chunks) == chunks
+
+
+class TestLLMDegradationIsVisible:
+    def test_failed_llm_is_logged_and_flagged(self):
+        trends = {"themes": [{"name": "t", "keywords": [], "emerging_score": 0.1,
+                              "style_tags": []}]}
+        with mock.patch.object(rag, "load_instagram_trends", return_value=trends), \
+             mock.patch.object(rag, "retrieve_instagram_chunks",
+                               return_value=[{"name": "t"}]), \
+             mock.patch("src.llm.format_answer_with_llm", return_value=None):
+            res = rag.run_query("what is trending right now", k=1)
+        assert res["degraded"] is True
+        assert res["degradedReason"] == "no answer returned"
+        assert res["answerMode"].startswith("rule-based (llm unavailable")
+
+    def test_successful_llm_is_not_degraded(self):
+        trends = {"themes": [{"name": "t", "keywords": [], "emerging_score": 0.1,
+                              "style_tags": []}]}
+        with mock.patch.object(rag, "load_instagram_trends", return_value=trends), \
+             mock.patch.object(rag, "retrieve_instagram_chunks",
+                               return_value=[{"name": "t"}]), \
+             mock.patch("src.llm.format_answer_with_llm", return_value="REAL ANSWER"):
+            res = rag.run_query("what is trending right now", k=1)
+        assert res["degraded"] is False
+        assert res["degradedReason"] is None
+        assert res["answer"] == "REAL ANSWER"

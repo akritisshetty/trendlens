@@ -5,10 +5,6 @@ import { fetchLiveTiles } from "../../services/liveTiles";
 
 const MIN_LIVE_TILES = 3;
 
-// How often the live wall re-fetches a fresh random slice of Instagram
-// images from the backend (in ms).
-const REFRESH_MS = 60_000;
-
 export default function TrendsSection() {
   // Placeholder wall renders instantly; swapped for the real Instagram
   // feed once /api/instagram-tiles responds.
@@ -25,12 +21,20 @@ export default function TrendsSection() {
         setIsLive(true);
       });
 
+    // Fresh randomized wall on page load.
     load();
-    const timer = setInterval(load, REFRESH_MS);
+
+    // Re-fetch whenever the tab is shown again (page refresh / navigation
+    // back), so each visit surfaces a different random slice. No background
+    // timer — the wall changes when the user actually comes back to it.
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

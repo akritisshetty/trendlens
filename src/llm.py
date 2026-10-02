@@ -29,6 +29,8 @@ from typing import Any, Optional
 
 import requests
 
+import config
+
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "{model}:generateContent?key={key}"
@@ -38,56 +40,47 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 
 SYSTEM_PROMPT = """You are the writing layer of TrendLens, a social-media visual-trend detector.
 
-You are given RETRIEVED CONTEXT — text chunks from a visual-trend knowledge base, found via semantic search against the user's question. Your job is to generate an answer that is DIRECTLY GROUNDED in this retrieved context. Every piece of advice must reference what the retrieved data says.
+You are given RETRIEVED CONTEXT — measured evidence about real Instagram posts, found via semantic search against the user's question. Your job is to turn that evidence into a specific, followable shooting plan.
 
-STRICT RULES — violations are unacceptable:
-1. Base EVERY claim on the RETRIVED CONTEXT. Never invent subjects, colors, stats, platforms, hashtags, posting times, or engagement numbers that are not present in the retrieved data.
-2. The engagement/likes/timestamps in the evidence are SYNTHETIC DEMO data unless the evidence explicitly says otherwise. Present them as demo estimates, never as real platform numbers.
-3. If the retrieved context contains no real match for the subject, say so honestly and describe the closest matches from what WAS retrieved.
-4. Answer the user's question directly. Do not say you are an AI/LLM. Do not refuse.
-5. Follow the OUTPUT FORMAT below exactly.
+THE ONE RULE THAT MATTERS
+Every instruction you give must trace back to something in the RETRIEVED CONTEXT. You may SELECT, SEQUENCE and REPHRASE evidence. You may NOT invent photography advice. If the context does not say it, you do not say it. A made-up tip is a fabrication and is worse than a short answer.
 
-OUTPUT FORMAT — scannable structure with substantive content:
-1. Open with ONE short intro sentence framing what the data shows.
-2. Render each relevant theme as its own markdown bullet, separated by BLANK
-   LINES, ranked by relevance, max 5 themes. Format:
-   - **Theme name:** What the trend is — the subject, mood, or behaviour driving
-     it — plus one concrete execution cue from its style tags. Max two sentences.
-3. Close with ONE short sentence synthesising the directions so the reader can
-   choose between them (e.g. technical vs rustic).
-4. Standalone shooting-advice bullets ONLY when the question explicitly asks HOW
-   to shoot; otherwise fold the key cue into each theme's description.
-5. Separate every block with a BLANK LINE so markdown renders as clean lists.
-   Never use tables, section headers, or horizontal rules. Target 150–250 words.
-   Every sentence must be grounded in the retrieved evidence.
+WHAT THE EVIDENCE CONTAINS
+- `shot_recipe`: for each theme, a list of measured photography decisions. Each has an `aspect` (lighting / framing / color mood / composition / process), the `tag` that was detected, and `steps` — concrete actions a photographer can take. These steps were written by the TrendLens project and are attached to the style tag that CLIP actually measured on that theme's images. Use them.
+- `engagement`: how the theme's real posts performed. `median_likes` is the typical post, not the viral outlier.
+- `blip_caption` / `description` / `example_captions`: what the images show and what real captions said.
 
-CRITICAL — NEVER mention these in your answer:
-- Cluster IDs (e.g. "Cluster 20", "cluster 17", "Cluster #5")
-- Engagement scores, post counts, or trend scores (e.g. "79.04", "325 posts", "trend score 0.11")
-- Lifecycle labels (e.g. "Rising", "Stable", "Declining")
-- Trend category labels (e.g. "Trending up", "Fading", "Steady presence", "Just appeared")
-- Any numeric metrics from the pipeline internals
+HOW TO USE THE SHOT RECIPE
+The recipe is the product. Do not summarise it into vague adjectives ("use nice lighting"). Deliver the steps themselves.
+- Order them as a photographer works: light first, then framing, then colour, then arrangement, then in-process storytelling.
+- Convert each step into an imperative the reader can act on.
+- Keep every step. Compressing three concrete actions into one loses the value.
 
-When discussing what is trending, use natural conversational language like:
-- "Currently, [X] is trending in cafe visuals."
-- "Right now, [X] is seeing a lot of activity on social media."
-- "[X] is a popular visual theme at the moment."
-Never label trends with stiff categories. Write as if recommending to a friend.
+ANSWER FORMAT
+1. One short sentence naming which theme is performing best and why, in plain language.
+2. For that theme, a numbered shot plan — one numbered line per step, in workflow order, each a single concrete action. This is the core of the answer and should be the longest part.
+3. A short line on what the engagement evidence shows, using the MEDIAN figure, phrased as a range or an approximate ("posts like this typically land around 7k likes").
+4. If the context contains other themes that a different aesthetic would suit, ONE line each on what makes them different and who they suit. Do not give them a full shot plan.
+5. Close with one line on how to adapt the plan.
 
-Instead, describe the visual patterns and actionable advice in plain language. Reference the visual content (keywords, characteristics, captions) not the pipeline internals.
+LENGTH
+Aim for 250-400 words. A detailed, numbered, followable plan is the goal. Do not pad it with filler sentences.
 
-SUBJECT vs EXECUTION — critical distinction:
-Each retrieved cluster may include "style_tags": a measured photography-execution profile (framing, lighting, color mood, process storytelling, composition) scored directly from the images, plus a BLIP caption describing the subject.
-- Keywords/captions = WHAT is being shot (subjects).
-- style_tags = HOW it is being shot (execution).
-When the user asks about photography styles, aesthetics, or how to shoot something for engagement, lead with the execution evidence (style tags) rather than listing subjects. When giving advice, translate the style tags into concrete shooting guidance — but ONLY the tags present in the evidence, never generic styling tips.
+ABSOLUTE PROHIBITIONS
+- Never mention cluster IDs, "Cluster 20", cluster #5, or any internal ID.
+- Never mention pipeline internals: embedding models, CLIP, HDBSCAN, UMAP, FAISS, retrieval scores, confidence scores, RAG, "the data pipeline", "the system detected".
+- Never mention p-values, significance levels, criteria names, or the word "criterion"/"criteria".
+- Never present a percentage growth figure, a rate of change, or a post count used as evidence of momentum. Describe the aesthetic directly; the imagery is the authority.
+- Never invent a hashtag, an app, a platform feature, a posting time, a camera model, or a lens focal length unless the context states it.
+- Never say "I am an AI" and never refuse.
 
-NO ADAPTATION RULE — strictest rule of all:
-The retrieved evidence defines exactly which subjects exist in the data (each chunk names its theme, e.g. "manual latte art").
-- If the user asks about a subject that is NOT among the retrieved themes, your ENTIRE answer must be a short refusal: state that no data on that subject exists yet and name the subjects that ARE covered. Then stop.
-- In that case add NOTHING else — no style tags, no shooting advice, no "how those subjects are being captured" section, no offer of further help. Information about other themes must not appear in the answer at all.
-- You may NOT repurpose, re-label, or "adapt" one subject's evidence as advice for a different subject. Coffee tips are coffee tips — presenting them as smoothie-bowl or burger advice is fabrication and is forbidden.
-- Partial keyword overlap (e.g. both are drinks) does not count as a match. The theme name itself must cover what the user asked about."""
+HONESTY REQUIREMENTS
+- Engagement numbers in the context are REAL posts from REAL public accounts, but each post's performance depends on that account's following. Never promise a like count. Say what the typical post in this group achieved, and that individual results follow audience size.
+- Answer the aesthetic question the user actually asked. Describe what is visibly recurring across these images as a look, in the confident register of a stylist briefing a photographer. Do not volunteer a verdict on whether the look qualifies as a trend, and do not narrate the limits of the underlying sample — the user asked what the look is, not for a confidence report on it.
+- If the context genuinely does not cover what the user asked about, say that in one sentence, name the themes that ARE covered, and stop. Do not repurpose one theme's recipe as advice for a different subject — coffee steps are not smoothie-bowl steps.
+
+WRITING STYLE
+Write to one person holding a camera. Direct, concrete, confident. No hedging adverbs, no "consider perhaps", no filler. Reference the visual content, not the machinery behind it."""
 
 
 def llm_config() -> dict[str, Any]:
@@ -122,26 +115,69 @@ def llm_enabled() -> bool:
     return True
 
 
-def _trim_evidence(context: dict[str, Any]) -> dict[str, Any]:
-    """Reduce the context to a compact, serialisable evidence bundle.
-
-    Excludes cluster IDs, engagement scores, lifecycle labels, and other
-    pipeline internals — only the visual content (name, description,
-    characteristics, captions) is passed to the LLM.
+def _engagement_block(cluster: dict[str, Any]) -> dict[str, Any]:
     """
+    Build the engagement evidence block.
+
+    Only the MEDIAN is passed. The mean on this corpus is dominated by single
+    viral posts (observed: 15.5M likes against a 7k median), so handing the
+    model a mean would produce advice calibrated to an outlier that a reader
+    will never reproduce.
+    """
+    median_likes = cluster.get("median_likes")
+    block: dict[str, Any] = {
+        "median_likes": median_likes,
+        "median_comments": cluster.get("median_comments"),
+        "n_posts": cluster.get("n_posts"),
+        "recent_posts": cluster.get("n_recent"),
+        "accounts_contributing": cluster.get("recent_authors"),
+    }
+    coverage = cluster.get("likes_coverage")
+    if coverage is not None and coverage < 1.0:
+        # A median computed over part of the sample is a weaker claim, and the
+        # model needs to know that so it can hedge appropriately.
+        block["like_count_known_for"] = coverage
+    if cluster.get("median_likes_reliable") is False:
+        block["small_sample_caveat"] = (
+            "fewer than 8 posts have a known like count; treat this as indicative"
+        )
+    return block
+
+
+def _trim_evidence(context: dict[str, Any]) -> dict[str, Any]:
+    """
+    Reduce the context to a compact, serialisable evidence bundle.
+
+    Passes the measured ``shot_recipe`` (authored in code, tied to style tags
+    that were actually scored on the images) rather than raw style tags alone,
+    so the model has something concrete to turn into a plan. Excludes cluster
+    IDs, significance values, criterion names and other pipeline internals.
+
+    Trend-verdict fields are also withheld. They were previously passed as
+    ``is_confirmed_rising_trend`` / ``why_not_a_confirmed_trend``, which
+    reliably produced an "insufficient posts in the window" sentence in the
+    middle of an otherwise good answer. The user asked what a look is, not how
+    confident the pipeline is about it, so the verdict never reaches the model
+    and it has no occasion to caveat.
+    """
+    from src.style_tags import build_shot_recipe
+
     clusters = []
     for c in context.get("retrieved_clusters", []):
-        clusters.append(
-            {
-                "rank": c.get("rank"),
-                "name": c.get("name"),
-                "description": c.get("description"),
-                "blip_caption": c.get("blip_caption"),
-                "characteristics": c.get("characteristics", []),
-                "style_tags": c.get("style_tags", []),
-                "interpretation_confidence": c.get("interpretation_confidence"),
-            }
-        )
+        style_tags = c.get("style_tags", []) or []
+        recipe = build_shot_recipe(style_tags)
+
+        entry: dict[str, Any] = {
+            "rank": c.get("rank"),
+            "name": c.get("name"),
+            "description": c.get("description"),
+            "blip_caption": c.get("blip_caption"),
+            "example_captions": (c.get("example_captions") or [])[:2],
+            "shot_recipe": recipe,
+            "engagement": _engagement_block(c),
+        }
+        clusters.append(entry)
+
     bundle = {
         "query": context.get("query"),
         "total_clusters_analyzed": context.get("total_clusters_analyzed"),
@@ -161,11 +197,10 @@ def _trim_evidence(context: dict[str, Any]) -> dict[str, Any]:
                     "name": t.get("name"),
                     "keywords": t.get("keywords", []),
                     "blip_caption": t.get("blip_caption"),
-                    "style_tags": t.get("style_tags", []),
+                    "shot_recipe": build_shot_recipe(t.get("style_tags", []) or []),
                     "recent_posts": t.get("recent_posts"),
                     "prior_posts": t.get("prior_posts"),
                     "growth_rate": t.get("growth_rate"),
-                    "avg_engagement": t.get("avg_engagement"),
                     "total_comments": t.get("total_comments"),
                     "subreddits": t.get("subreddits", []),
                 }
@@ -175,7 +210,10 @@ def _trim_evidence(context: dict[str, Any]) -> dict[str, Any]:
     return bundle
 
 
-def _call_gemini(cfg: dict[str, Any], user_prompt: str) -> Optional[str]:
+def _call_gemini(
+    cfg: dict[str, Any], user_prompt: str, generation: Optional[dict] = None
+) -> Optional[str]:
+    generation = generation or {}
     url = GEMINI_URL.format(model=cfg["model"], key=cfg["api_key"])
     payload = {
         "contents": [{
@@ -184,7 +222,17 @@ def _call_gemini(cfg: dict[str, Any], user_prompt: str) -> Optional[str]:
                 {"text": user_prompt},
             ]
         }],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 4096},
+        "generationConfig": {
+            # Temperature is low on purpose. The task is faithful rewriting of
+            # supplied evidence, not creative generation: at 0.7 the model
+            # paraphrases loosely and drifts toward generic photography advice,
+            # which is exactly the failure the system prompt forbids. 0.3 keeps
+            # wording varied between runs while staying anchored to the
+            # evidence. Overridable so it can be re-tuned with the eval harness
+            # in evaluate_real.py rather than by guesswork.
+            "temperature": float(generation.get("temperature", 0.3)),
+            "maxOutputTokens": int(generation.get("max_tokens", 2048)),
+        },
     }
     resp = requests.post(url, json=payload, timeout=60)
     resp.raise_for_status()
@@ -195,7 +243,10 @@ def _call_gemini(cfg: dict[str, Any], user_prompt: str) -> Optional[str]:
         return None
 
 
-def _call_openai(cfg: dict[str, Any], user_prompt: str) -> Optional[str]:
+def _call_openai(
+    cfg: dict[str, Any], user_prompt: str, generation: Optional[dict] = None
+) -> Optional[str]:
+    generation = generation or {}
     url = cfg["base_url"] or OPENAI_URL
     headers = {"Authorization": f"Bearer {cfg['api_key']}"}
     payload = {
@@ -204,8 +255,9 @@ def _call_openai(cfg: dict[str, Any], user_prompt: str) -> Optional[str]:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.7,
-        "max_tokens": 4096,
+        # See _call_gemini for why these are low rather than 0.7.
+        "temperature": float(generation.get("temperature", 0.3)),
+        "max_tokens": int(generation.get("max_tokens", 2048)),
     }
     resp = requests.post(url, json=payload, headers=headers, timeout=60)
     resp.raise_for_status()
@@ -216,7 +268,10 @@ def _call_openai(cfg: dict[str, Any], user_prompt: str) -> Optional[str]:
         return None
 
 
-def _call_ollama(cfg: dict[str, Any], user_prompt: str) -> Optional[str]:
+def _call_ollama(
+    cfg: dict[str, Any], user_prompt: str, generation: Optional[dict] = None
+) -> Optional[str]:
+    generation = generation or {}
     url = (cfg["base_url"] or OLLAMA_URL).rstrip("/") + "/api/chat"
     payload = {
         "model": cfg["model"],
@@ -225,6 +280,10 @@ def _call_ollama(cfg: dict[str, Any], user_prompt: str) -> Optional[str]:
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
+        "options": {
+            "temperature": float(generation.get("temperature", 0.3)),
+            "num_predict": int(generation.get("max_tokens", 2048)),
+        },
     }
     resp = requests.post(url, json=payload, timeout=120)
     resp.raise_for_status()
@@ -264,32 +323,52 @@ def format_answer_with_llm(query: str, context: dict[str, Any]) -> Optional[str]
     # RAG Step 1: Retrieve relevant text chunks from the knowledge base
     # (optional — may fail if legacy pipeline artifacts are missing, e.g.
     #  when only Instagram data is available)
+    #
+    # NOTE: retrieved_text is no longer spliced into the prompt. The old code
+    # prefixed each chunk with "[Source: cluster 7]" and the prompt's own ban
+    # on mentioning cluster IDs then had to suppress a string the prompt had
+    # just handed the model. The structured JSON below carries strictly more
+    # signal, so the raw text is dropped rather than passed and then forbidden.
     retrieved_text = ""
     try:
         from src.rag import retrieve_text_chunks
 
-        retrieved_chunks = retrieve_text_chunks(query, k=5)
+        retrieved_chunks = retrieve_text_chunks(query, k=config.RAG_RETRIEVAL_K)
         if retrieved_chunks:
-            retrieved_text = "\n\n".join(
-                f"[Source: cluster {c['cluster_id']}] {c['text']}"
-                for c in retrieved_chunks
+            retrieved_text = "\n".join(
+                c["text"] for c in retrieved_chunks if c.get("text")
             )
     except Exception:  # noqa: BLE001
         pass
 
     # RAG Step 2: Build prompt with retrieved context
     evidence = _trim_evidence(context)
+    n_with_recipe = sum(
+        1 for c in evidence.get("retrieved_clusters", []) if c.get("shot_recipe")
+    )
     user_prompt = (
         f"USER QUESTION: {query}\n\n"
-        "RETRIEVED CONTEXT (relevant visual trends found in the knowledge base):\n"
-        + retrieved_text
+        f"TREND STATUS: {n_with_recipe} of "
+        f"{len(evidence.get('retrieved_clusters', []))} retrieved theme(s) carry a "
+        f"measured shot recipe.\n\n"
+        "SUPPORTING NOTES FROM THE INDEX:\n"
+        + (retrieved_text or "(none)")
         + "\n\n"
-        "RETRIEVED CLUSTER DATA (JSON):\n"
+        "RETRIEVED EVIDENCE (JSON — this is the complete set of facts you may use):\n"
         + json.dumps(evidence, indent=1, default=str)
     )
 
     # RAG Step 3: LLM generates answer grounded in retrieved context
+    # Generation params are overridable per call so the evaluation harness can
+    # sweep temperature against faithfulness rather than assuming 0.7 is right.
+    generation = {
+        "temperature": float(os.environ.get("TRENDLENS_LLM_TEMPERATURE", "0.3")),
+        "max_tokens": int(os.environ.get("TRENDLENS_LLM_MAX_TOKENS", "2048")),
+    }
     try:
+        text = caller(cfg, user_prompt, generation)
+    except TypeError:
+        # Backwards compatibility with any caller still on the 2-arg signature.
         text = caller(cfg, user_prompt)
     except Exception:  # noqa: BLE001 — never let the LLM break the query path
         return None

@@ -1,0 +1,88 @@
+{
+ "selection_rule": {
+  "primary": "mean spearman rho over by-account splits [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]",
+  "gates": {
+   "coverage": 0.55,
+   "n_clusters": 8,
+   "stability_ari": 0.55
+  },
+  "tie_break": [
+   "trend_precision_at_5",
+   "encode_minutes"
+  ],
+  "rho_tie_tolerance": 0.001
+ },
+ "grid": {
+  "umap_components": [
+   10,
+   15,
+   20
+  ],
+  "min_cluster_size": [
+   5,
+   8,
+   12
+  ],
+  "min_samples": [
+   3,
+   5
+  ],
+  "umap_seeds": [
+   42,
+   7,
+   13
+  ]
+ },
+ "winner": {
+  "encoder": "openai/clip-vit-base-patch32",
+  "umap_components": 15,
+  "min_cluster_size": 8,
+  "min_samples": 5,
+  "selection_rho": 0.15997434755191367,
+  "holdout_rho": 0.09941864175186371,
+  "holdout_rho_std": 0.12494945302821489,
+  "holdout_rho_sem": 0.027939547072250544,
+  "holdout_n_splits": 20,
+  "holdout_seeds": [
+   9001,
+   9002,
+   9003,
+   9004,
+   9005,
+   9006,
+   9007,
+   9008,
+   9009,
+   9010,
+   9011,
+   9012,
+   9013,
+   9014,
+   9015,
+   9016,
+   9017,
+   9018,
+   9019,
+   9020
+  ],
+  "coverage": 0.7774219375500401,
+  "trend_precision_at_5": 0.0,
+  "n_clusters": 30
+ },
+ "best_per_encoder": [
+  {
+   "encoder": "openai/clip-vit-base-patch32",
+   "umap_components": 15,
+   "min_cluster_size": 8,
+   "min_samples": 5,
+   "n_clusters": 30,
+   "rho": 0.15997434755191367,
+   "rho_std": 0.08664028705566149,
+   "coverage": 0.7774219375500401,
+   "trend_precision_at_5": 0.0,
+   "stability_ari": 0.5952025980193906,
+   "encode_minutes": 2.84204902303336
+  }
+ ],
+ "caveat": "Hyperparameters were selected against the evaluation corpus, so holdout_rho is optimistic too but is measured on splits that were not consulted during selection. Encoder-to-encoder comparison is fair because every candidate saw the identical rule and grid."
+}

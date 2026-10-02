@@ -74,10 +74,27 @@ def _normalize_post(item: dict[str, Any]) -> dict[str, Any]:
     if not hashtags and caption:
         hashtags = [w.lstrip("#") for w in caption.split() if w.startswith("#")]
 
-    likes = item.get("likesCount") or item.get("likes") or 0
-    comments = item.get("commentsCount") or item.get("comments") or 0
-    views = item.get("videoViewCount") or item.get("views") or 0
-    plays = item.get("videoPlayCount") or 0
+    # NOTE: these must NOT use a truthy `or 0` chain. Instagram returns
+    # likesCount = -1 for posts whose count is hidden, and -1 is truthy in
+    # Python, so the old chain wrote the sentinel straight into the dataset.
+    # A negative count means "unknown", so it is preserved as None (→ NaN)
+    # and handled centrally in src.data_quality.clean_engagement.
+    def _count(*keys: str) -> float | None:
+        for k in keys:
+            v = item.get(k)
+            if v is None:
+                continue
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            return float(n) if n >= 0 else None
+        return None
+
+    likes = _count("likesCount", "likes")
+    comments = _count("commentsCount", "comments")
+    views = _count("videoViewCount", "views")
+    plays = _count("videoPlayCount")
 
     post_id = item.get("id") or item.get("shortCode") or ""
 
@@ -114,11 +131,11 @@ def _normalize_post(item: dict[str, Any]) -> dict[str, Any]:
         "caption": caption,
         "alt_text": item.get("alt") or "",
         "timestamp": ts,
-        # Engagement
-        "likes": int(likes),
-        "comments": int(comments),
-        "views": int(views),
-        "plays": int(plays),
+        # Engagement (NaN = hidden/unknown, never a fabricated 0)
+        "likes": likes,
+        "comments": comments,
+        "views": views,
+        "plays": plays,
         # Metadata
         "hashtags": hashtags,
         "mentions": mentions,
@@ -181,6 +198,7 @@ def fetch_instagram_posts(
     # Speed/cost knobs (env-overridable):
     #   TRENDLENS_MAX_ACCOUNTS       cap how many accounts are fetched
     #   TRENDLENS_POSTS_PER_ACCOUNT  cap posts per account
+    #   TRENDLENS_APIFY_TIMEOUT      wall-clock budget for the actor run
     import os
 
     max_accounts = int(os.environ.get("TRENDLENS_MAX_ACCOUNTS", "0") or 0)
@@ -192,6 +210,21 @@ def fetch_instagram_posts(
         )
     except ValueError:
         pass
+    # The 10-minute default was tuned for a handful of accounts. A full
+    # 98-account run regularly overruns it, and because the run keeps going
+    # server-side, hitting that limit throws away finished work and still
+    # bills for it. Allow ~30s per account on top of the base budget.
+    try:
+        timeout = int(os.environ.get("TRENDLENS_APIFY_TIMEOUT", "0") or 0) or max(
+            timeout, MAX_WAIT + 30 * len(accounts)
+        )
+    except ValueError:
+        pass
+    if timeout > MAX_WAIT:
+        print(
+            f"[apify] wall-clock budget raised to {timeout}s "
+            f"for {len(accounts)} accounts x {posts_per_account} posts"
+        )
 
     usernames = [_extract_username(a) for a in accounts]
 

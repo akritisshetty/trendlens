@@ -1,0 +1,376 @@
+====================================================================================
+TRENDLENS — FULL PRESENTATION SCRIPT (LIVE DEMO + HOMEPAGE + ALL SLIDES)
+Project: A Multimodal RAG-Powered System for Visual Trend Detection and
+         Analysis on Social Media
+====================================================================================
+
+HOW TO USE THIS FILE
+--------------------
+- Speak the quoted lines out loud. Text in [brackets] is an action/direction for you,
+  not to be read aloud.
+- Everything is grounded in the ACTUAL project (src/api.py, run.sh, README.md,
+  baseline CSV files, data/instagram/trends.json) — so you can safely quote numbers.
+- The 5 demo questions were tested live against python -m src.rag and the outputs
+  below match the real system.
+
+
+------------------------------------------------------------------------------------
+STEP 0 — BEFORE YOU START (setup checklist)
+------------------------------------------------------------------------------------
+A) Cold-start / launch (do this BEFORE the audience arrives, not during):
+   [Option 1 - one-shot script, recommend this]
+     source venv/bin/activate && ./run.sh --fast
+     --fast = skip the data pipeline and just start servers on existing data.
+     If you built a baseline already, this is fastest and safest for a demo.
+
+   [Option 2 - manual, server by server]
+     source venv/bin/activate
+     python -m src.api                          # Python backend on :8000
+     (frontend, a 2nd terminal)
+     cd frontend && npx tsx server.ts            # React frontend on :3000
+
+   [If you have no data yet]
+     ./run.sh                                    # runs pipeline (10-day) then servers
+     (needs APIFY_API_TOKEN in .env)
+
+   [Optional CLI sanity check the questions resolve]
+     python -m src.rag "How should I style my hair?"
+     python -m src.rag "What cafe aesthetic is rising this week?"
+
+B) Verify before presenting:
+   - curl http://127.0.0.1:8000/api/health   -> status ok
+   - http://localhost:3000 opens the homepage
+   - First-ever run downloads CLIP/BLIP/sentence-transformers weights. Pre-download
+     them so the demo doesn't stall.  (You saw this happen while testing.)
+   - Keep the terminal where the backend logs are visible; if something errors,
+     you can see it — but the frontend shows an honest "backend offline" message,
+     never fabricated data.
+
+C) Ports used by the system:
+   - :8000  Python backend (src/api.py)
+   - :3000  React frontend, Express dev server (frontend/server.ts)
+   - (24678 vite) — killed/restarted by run.sh
+   run.sh kills stale processes on these ports first.
+
+HOW THE PIECES FIT (if a teacher asks "what is Flask/FastAPI?")
+   The backend is NOT Flask or FastAPI. It is Python's standard-library
+   http.server (src/api.py) — deliberately zero-dependency so it runs on free
+   tier/Colab. The React frontend has an Express server (frontend/server.ts)
+   that PROXIES every /api/* call to the Python backend. The frontend never
+   fabricates results — if the backend is down it says so explicitly.
+
+
+------------------------------------------------------------------------------------
+PART 1 — HOMEPAGE WALKTHROUGH (before typing anything in chat)
+------------------------------------------------------------------------------------
+[Have http://localhost:3000 opened on the homepage. Take a breath, then:]
+
+"Let me walk you through the TrendLens homepage, then I'll show the live demo."
+
+1) HERO / HEADLINE
+   "At the top is the product name — TrendLens — with a bold kinetic title.
+    The tagline captures the core idea: we find trends before they have a
+    name. This is the single claim that makes our project different from
+    Google Trends, Exploding Topics, or Brandwatch."
+
+2) TRENDS SECTION (the marquee / live trend wall)
+   "Next is a live-feeling display of the actual trends the system has found —
+    real Instagram themes detected by clustering images, not by keywords.
+    Each tile has a real title, the author account, and a niche category like
+    Coffee, Fashion, or Photography. On every refresh the wall shows a fresh
+    random slice of the collected posts, so it always feels alive."
+
+3) HOW IT WORKS
+   "Scrolling down, there's an overview of the pipeline: Instagram posts ->
+    CLIP visual embeddings -> UMAP -> HDBSCAN clustering -> BLIP captions ->
+    temporal trend scoring -> FAISS retrieval -> a natural-language answer.
+    This is the same pipeline powering the chat you're about to see."
+
+4) EXPLORE / CALL-TO-ACTION
+   "A section that nudges you toward exploring specific trending niches or
+    opening the chat — food, fashion, photography, beauty."
+
+5) FEEDBACK
+   "Finally, a feedback form that actually emails the project inbox
+    (the address lives only on the server, never in the browser)."
+
+[Optional: mention clutter-free design - React 19 + Vite + Tailwind + Framer Motion.
+ If asked "what's the stack": React 19, Vite, Tailwind, Framer Motion, Recharts for
+ charts; react-markdown renders the LLM's answers.]
+
+
+------------------------------------------------------------------------------------
+PART 2 — TRANSITION INTO THE CHAT DEMO
+------------------------------------------------------------------------------------
+[Click into the Chat page. Say:]
+
+"Now the main event — the chat. You type a natural-language question about
+what's trending visually, and TrendLens answers using REAL Instagram data:
+real post counts, real growth, real engagement. It's grounded — it doesn't
+make numbers up. Watch."
+
+
+------------------------------------------------------------------------------------
+DEMO Q1 — "How should I style my hair?"
+------------------------------------------------------------------------------------
+[Type: How should I style my hair? and send.]
+
+[After the animation completes - a markdown answer appears with the retrieved
+ cluster(s). Point at the screen as you talk.]
+
+"Notice this isn't a generic chatbot answer. The system retrieved a real visual
+cluster about curly / natural-texture hair styling — you saw the keyword
+'natural curls' and 'cacheada' in the evidence. It grouped posts by how they
+LOOK, not by what hashtag they share. Then it turned the real engagement data
+into a recommendation: highlight natural curl texture.
+
+So the answer is evidence-grounded: it shows WHY TrendLens said this, and it
+came from actual posts — this is the retrieval part of RAG."
+
+
+------------------------------------------------------------------------------------
+DEMO Q2 — "What's different about trending cafe content vs restaurant content?"
+------------------------------------------------------------------------------------
+[Type: What's different about trending cafe content vs restaurant content?]
+
+"Now a comparison question — notice how the system separates two things that
+both involve food:
+- The CAFE side points at manual latte art — the craft of pouring patterns,
+  often done at home.
+- The RESTAURANT side is about specific spots and dishes, like the fried
+  chicken reviews.
+
+CLIP separates them by visual content, and retrieval surfaces each cluster for
+the comparison. And these aren't invented stats: the latte-art cluster has
+roughly 50 posts with very high engagement, while the fried-chicken cluster has
+around 80. Real numbers from real posts."
+
+
+------------------------------------------------------------------------------------
+DEMO Q3 — "Which country's style is in trend in fashion right now?"
+------------------------------------------------------------------------------------
+[Type: Which country's style is in trend in fashion right now?]
+
+"Here it identifies FRENCH / Parisian-chic as the fashion aesthetic currently
+in the data — you can see keywords like 'parisianchic' and 'parisstreetstyle'.
+Again: the images clustered visually around that Parisian street-style look
+before anyone necessarily tagged it. TrendLens sees the pattern in the pixels.
+
+[If asked - be honest] Note it also surfaced the curly-hair cluster as a
+secondary match — retrieval can return more than one related theme, and it
+says so honestly rather than pretending."
+
+
+------------------------------------------------------------------------------------
+DEMO Q4 — "What cafe aesthetic is rising this week?"
+------------------------------------------------------------------------------------
+[Type: What cafe aesthetic is rising this week?]
+
+"This is where the trend-detection really shows. Manual latte art comes back
+flagged as RISING this week — the pipeline compared recent posts against the
+prior window and computed a positive growth rate. On our current 10-day scan,
+latte art is the clearest rising cafe aesthetic; the other clusters show
+stable or declining scores.
+
+[If there aren't many 'rising' themes, say this to manage expectations:]
+That's actually expected with a 10-day window: at any moment only a handful of
+themes are genuinely on the way up — the rest are stable or cooling. That's
+the system being honest with the data, not inflating the results."
+
+
+------------------------------------------------------------------------------------
+DEMO Q5 — "Write a python code to sort a list."  (OUT-OF-SCOPE / the trap)
+------------------------------------------------------------------------------------
+[Before typing, say:]
+"Now watch what happens when someone asks something the system was NOT built
+for — like a programming question."
+
+[Type: Write a python code to sort a list.]
+
+[The system should reject it. Point at the answer as you speak:]
+
+"The system refuses — out of scope. This is the RAG scope gate at work.
+TrendLens is not a general chatbot that answers anything; it only answers
+about the visual-trend data it actually has evidence for. See how it politely
+says your question is a programming question, then redirects you to questions
+it CAN answer. That's a deliberate design decision — it prevents hallucination.
+If it doesn't have the evidence, it won't fabricate an answer."
+
+
+------------------------------------------------------------------------------------
+PART 3 — CLOSING LINE
+------------------------------------------------------------------------------------
+[Wrap up the demo, looking at the audience:]
+
+"To summarize: TrendLens detects visual trends straight from raw images,
+before they have a name — our clusters share almost no keywords at all, so
+keyword-based tools literally cannot see them. And it lets you ask questions
+in natural language and get evidence-grounded answers backed by real data.
+Thank you — I'm happy to take questions."
+
+
+------------------------------------------------------------------------------------
+PART 4 — RESULTS SLIDE (spoken points; pick 2-3 numbers, don't read all)
+------------------------------------------------------------------------------------
+"On the Results slide you see two screenshots — the homepage and the chat.
+Here are the numbers behind them."
+
+- CLUSTERING QUALITY (why HDBSCAN):
+    HDBSCAN on UMAP 15-d gives 18 clusters over 461 posts (82 unassigned as
+    noise, 82% assignment coverage), and is chosen over UMAP 10-d and 20-d by
+    a paired 80-split test: mean held-out rho 0.248 vs 0.170 / 0.177.
+    No ARI/NMI "vs cluster ground truth" is quoted because there is no
+    ground truth here - the labels ARE the clustering. Stability is measured
+    the honest way instead: cluster identity across re-projections.
+
+- THE HEADLINE RESULT — "trends before they have a name":
+    Inside our visual clusters, the mean HASHTAG overlap (Jaccard) is ~0.024
+    and keyword overlap ~0.03. Meaning: posts grouped by VISUAL similarity
+    share essentially NO words. A hashtag/Google-Trends/keyword tool has no
+    query term to run — the trend exists only at the image level. This is our
+    unique advantage.
+
+- WHY CLIP:
+    CLIP ViT-B/32 = 10.5 img/s, ~165 ms/image. CLIP ViT-L/14 is 21x slower
+    (0.5 img/s) for essentially no gain. DINOv2 has far lower intra-cluster
+    coherence (~0.08 vs CLIP's ~0.50).
+
+- RAG RETRIEVAL:
+    Hit rate @3 = 0.75, @5 = 1.00; MRR 0.68. Scope-gate accuracy 0.86 (lets in
+    relevant queries, rejects irrelevant ones — like the Python question).
+
+- TREND SCORING:
+    Our composite score (growth x size x stability) correlates +0.5 with real
+    engagement, while naive "simple growth" is NEGATIVELY correlated (-0.87).
+    Story: real growth matters, but volume and stability are what predict
+    engagement — naive growth alone misleads.
+
+- PERFORMANCE:
+    Incremental run ~15s (KNN assign skips UMAP+HDBSCAN); CLIP ~200ms/image;
+    UMAP+HDBSCAN+trends under 0.5s total for the batch.
+
+Anti-segue tip: end the slide with the headline claim —
+"And the highlight is that TrendLens finds trends that text-based tools
+physically cannot see, because our image clusters share almost no words."
+... then move to Work Pending.
+
+
+------------------------------------------------------------------------------------
+PART 5 — WORK PENDING IN PROJECT (slide 18)
+------------------------------------------------------------------------------------
+Read the bullet, then the one-line expansion:
+
+1) "Model and pipeline optimization"
+   -> "Done, and it changed my mind twice. We swept 5 image encoders x 18
+      clustering configs, 6 retrieval encoders and 2 captioners on the real
+      corpus. SigLIP2 did NOT beat CLIP ViT-B/32. The retriever went from the
+      MiniLM library default to bge-base (+0.09 MRR), and the captioner to
+      BLIP-large (distinct-2 0.70 -> 0.92). And the sweep's own winner, UMAP
+      20-d, was REJECTED: on a paired 80-split test 15-d wins by +0.07,
+      p=9e-10. Five-seed averages had a standard error larger than the
+      effect being measured, so we raised the seed count rather than trust it.
+      Next: more corpus - 461 posts is the binding constraint on every number."
+
+2) "Evaluation against baseline models"
+   -> "We've already benchmarked against KMeans/t-SNE/PCA/DBSCAN and against real
+      tools (Google-Trends-style keywords, hashtags, engagement lists). Remaining:
+      expand dataset size for more robust statistics, and add representative
+      IMAGES to retrieval answers so results can SHOW the trend, not only describe it."
+
+3) "Deployment of the website"
+   -> "The backend API and React frontend are built (backend = Python stdlib
+      http.server / zero-dependency; frontend proxies API via Express). Remaining:
+      host it on a public URL, wire up persistent storage + the SQLite accounts,
+      and schedule the data-collector to run daily so trends stay fresh."
+
+
+------------------------------------------------------------------------------------
+PART 6 — WORK PENDING IN PAPER (slide 19)
+------------------------------------------------------------------------------------
+PPT lists: Result, Discussion, Conclusion — the report/thesis sections not yet written.
+
+"The fundamentals — system, evaluation and baselines — are complete. What remains
+is writing the paper itself:
+- Result: formally presenting the metrics I just showed (clustering quality, the
+  text-diversity finding, RAG retrieval, baseline comparison) in written form with
+  figures and tables.
+- Discussion: interpreting WHY TrendLens works — why visual clusters precede text
+  labels — and honestly examining limitations (noise, caption quality, dataset
+  size) and their impact on the claims.
+- Conclusion: summarizing the contribution and future work."
+
+[If asked to distinguish the two pending lists, one-liner:]
+"The PROJECT work is the engineering left — deployment and more evaluation.
+The PAPER work is the WRITING of the results, discussion and conclusion."
+
+
+------------------------------------------------------------------------------------
+PART 7 — ANTICIPATED QUESTIONS (quick answers)
+------------------------------------------------------------------------------------
+Q: "Why are there no learning-rate / epochs / optimizer hyperparameters?"
+A: "TrendLens uses pre-trained models (CLIP, BLIP, LLM) plus classical ML
+   (UMAP, HDBSCAN, FAISS) — there's no neural-network training loop, so no
+   LR/epochs/optimizer. The hyperparameters are the algorithm settings —
+   UMAP neighbors, HDBSCAN cluster size, growth thresholds, retrieval k, LLM
+   temperature — which I benchmarked, not guessed."
+
+Q: "The frontend says backend offline — is it broken?"
+A: "No — by design, the frontend NEVER fabricates data. If the Python backend
+   is down it returns an explicit offline message. Start it and everything works."
+
+Q: "What is Flask / FastAPI in this project?"
+A: "Neither. The backend uses Python's standard-library http.server to stay
+   zero-dependency and free-tier friendly. The React frontend uses Express only
+   as a dev/proxy server that forwards /api/* to the Python backend."
+
+Q: "Why UMAP before HDBSCAN?"
+A: "HDBSCAN works poorly in very high dimensions (512-d). UMAP projects to a
+   10-d manifold while preserving neighborhood structure, making density-based
+   clusters cleaner. Benchmark: silhouette 0.58 vs KMeans 0.48."
+
+Q: "How do you keep cluster IDs stable across runs?"
+A: "The Cluster Tracker. Baseline run locks cluster centroids; later runs use
+   FAISS KNN to assign new images to existing clusters (similarity >= 0.25) and
+   form micro-clusters (>= 3 unassigned) when needed. Stable UUIDs enable real
+   time-series trend tracking instead of reshuffling every run."
+
+Q: "Is the data real?"
+A: "Yes. Instagram posts, timestamps, likes, comments, views come from public
+   accounts via Apify — not synthetic. Only the cluster NAMES are BLIP/VLM
+   interpretations of the visual content (those are labels, not ground truth)."
+
+
+====================================================================================
+QUICK-REFERENCE — KEY METRICS CARD (memorize 4-5)
+====================================================================================
+- 461 real posts -> 18 visual themes; 82 noise, via HDBSCAN on UMAP-15d.
+- Assignment coverage 0.82 vs 0.20 for hashtag-based grouping.
+- Held-out engagement rho 0.25 +- 0.11 (80 by-account splits; a single split
+  gives 0.29). Say the error bar out loud - it is the honest number.
+- Mean hashtag Jaccard inside clusters 0.041 => trends have NO shared name
+  => keyword/hashtag tools are blind.  (THE headline result)
+- RAG retriever bge-base-en-v1.5: R@1 0.43, R@3 0.69, MRR 0.59 on 72 queries
+  (beats the old MiniLM default 0.35 / 0.54 / 0.50).
+- Trend score correlates +0.5 with engagement; naive growth = -0.87.
+- Incremental pipeline ~15s; CLIP ~200ms/image.
+
+STACK AT A GLANCE
+- Data: Instagram via Apify (81 accounts across food/fashion/photography/beauty)
+- Embed: CLIP ViT-B/32 (512-d, L2)
+- Reduce: UMAP (20-d, cosine, nn=15, min_dist=0.0)
+- Cluster: HDBSCAN (min_cluster_size 5, min_samples 3, eom) + Cluster Tracker
+- Caption: BLIP large (max_new_tokens 40); CLIP zero-shot style tags
+- Verdict: formal trend definition (support/persistence/author-breadth/growth +
+  binomial significance) -> Rising | InsufficientData, never "declining"
+- Retrieve: FAISS IndexFlatIP over sentence-transformers (BAAI/bge-base-en-v1.5, 768-d)
+- Generate: LLM (Gemini default, plug-and-play OpenAI/Ollama), temp 0.3
+- Backend: Python stdlib http.server (src/api.py) on :8000
+- Frontend: React 19 + Vite + Tailwind + Framer Motion, Express proxy on :3000
+
+API ENDPOINTS (src/api.py) — shown on homepage/demo
+- GET  /api/health, /api/trends, /api/clusters, /api/images
+- GET  /api/instagram-trends, /api/instagram-images, /api/instagram-tiles
+- GET  /api/live-trends, /api/live-images
+- POST /api/rag-query, /api/auth/signup|login|logout, /api/feedback,
+       /api/predict-popularity
+====================================================================================

@@ -32,7 +32,9 @@ import numpy as np
 
 import config
 
-DEFAULT_BLIP_MODEL = "Salesforce/blip-image-captioning-base"
+#: Single source of truth is ``config.BLIP_MODEL`` (see the model-selection
+#: section there for how this checkpoint was chosen).
+DEFAULT_BLIP_MODEL = config.BLIP_MODEL
 
 _STOP = {
     "a", "an", "the", "this", "that", "these", "those", "is", "are", "was",

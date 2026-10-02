@@ -15,7 +15,12 @@ export async function fetchLiveTiles(timeoutMs = 4000): Promise<LiveTile[]> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch("/api/instagram-tiles", { signal: controller.signal });
+    // Cache-bust: a unique query param every call guarantees the browser
+    // requests a fresh randomized sample from the backend (never a cached one).
+    const res = await fetch(`/api/instagram-tiles?_=${Date.now()}`, {
+      signal: controller.signal,
+      cache: "no-store",
+    });
     clearTimeout(timer);
     if (!res.ok) return [];
     const data = await res.json();

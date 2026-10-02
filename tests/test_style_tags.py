@@ -46,9 +46,24 @@ class TestScoresFromPromptSims:
         sims[0, pos == 3] = np.asarray(vals, dtype="float32")
         out = st.scores_from_prompt_sims(sims)
         assert out.shape == (1, n_tags)
-        assert out[0, 3] == pytest.approx(float(np.mean(vals)))
-        # untouched tags average to 0
-        assert out[0, 0] == pytest.approx(0.0)
+        # Each tag's score is the mean of its prompts, minus the row mean over
+        # all tags — the modality-gap correction documented on the function.
+        tag3_raw = float(np.mean(vals))
+        row_mean = tag3_raw / n_tags  # every other tag is still 0.0
+        assert out[0, 3] == pytest.approx(tag3_raw - row_mean)
+        # untouched tags sit below the row mean by the same amount
+        assert out[0, 0] == pytest.approx(0.0 - row_mean)
+        assert out[0, 3] > out[0, 0]
+
+    def test_mean_centering_removes_row_offset(self):
+        """A constant offset on every prompt of an image must not change ranks."""
+        n_prompts = len(st.ALL_PROMPTS)
+        rng = np.random.default_rng(11)
+        sims = rng.uniform(0.15, 0.30, size=(1, n_prompts)).astype("float32")
+        a = st.scores_from_prompt_sims(sims)
+        b = st.scores_from_prompt_sims(sims + 0.05)
+        assert np.allclose(a, b, atol=1e-6)
+        assert a[0].argmax() == b[0].argmax()
 
     def test_wrong_width_raises(self):
         with pytest.raises(ValueError):

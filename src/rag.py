@@ -22,6 +22,7 @@ INTEGRITY
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -30,7 +31,9 @@ import numpy as np
 import pandas as pd
 
 import config
-from src.style_tags import format_style_tags, taxonomy_record
+from src.style_tags import build_shot_recipe, taxonomy_record
+
+_LOG = logging.getLogger(__name__)
 
 _LIFECYCLE_EMOJI = {"Rising": "📈", "Stable": "📊", "Declining": "📉"}
 
@@ -59,9 +62,15 @@ def _total_clusters_safe() -> int:
 
 def load_metrics() -> pd.DataFrame:
     if "metrics" not in _CACHE:
-        _CACHE["metrics"] = pd.read_csv(
-            config.CLUSTER_METADATA_DIR / "trend_metrics.csv"
-        ).set_index("cluster_id")
+        path = config.CLUSTER_METADATA_DIR / "trend_metrics.csv"
+        if path.exists():
+            _CACHE["metrics"] = pd.read_csv(path).set_index("cluster_id")
+        else:
+            # Legacy column stream was replaced by trends.json; keep legacy
+            # callers from crashing on a fresh checkout.
+            _CACHE["metrics"] = pd.DataFrame(
+                columns=["cluster_id", "n_posts", "lifecycle"]
+            ).set_index("cluster_id")
     return _CACHE["metrics"]
 
 
@@ -80,7 +89,7 @@ def _load_retrieval():
 
     if "retrieval" not in _CACHE:
         model, processor, device = retrieval.load_clip_text()
-        embs = np.load(retrieval.TEXT_EMBEDDINGS_PATH, mmap_mode="r")
+        np.load(retrieval.TEXT_EMBEDDINGS_PATH, mmap_mode="r")
         meta = json.loads(retrieval.TEXT_CLUSTER_IDS_PATH.read_text())
         cluster_ids = list(meta["cluster_ids"])
         index = retrieval.load_index()
@@ -163,7 +172,7 @@ def _load_instagram_rag_index() -> None:
     if not _INSTAGRAM_CHUNKS_CACHE:
         return
 
-    _INSTAGRAM_RAG_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    _INSTAGRAM_RAG_MODEL = SentenceTransformer(config.RAG_EMBED_MODEL)
     _INSTAGRAM_RAG_INDEX = faiss.read_index(str(index_path))
 
 
@@ -195,11 +204,232 @@ def retrieve_instagram_chunks(query: str, k: int = 5, min_score: float = 0.25) -
     return results
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Question topic gating (used by the deterministic fallback formatter)
+# ──────────────────────────────────────────────────────────────────────────
+# Words that carry no subject. "What is trending on social media right now?"
+# is a legitimate question about the whole corpus, so it must not be treated
+# as a request for a topic and silently filtered down to nothing.
+_GENERIC_QUERY_WORDS = {
+    "what", "whats", "which", "who", "how", "why", "when", "where", "show",
+    "tell", "give", "does", "any", "some", "currently", "now", "right",
+    "trend", "trends", "trending", "look", "looks", "looking", "style",
+    "styles", "aesthetic", "aesthetics", "vibe", "vibes", "social", "media",
+    "instagram", "content", "posts", "post", "reel", "reels", "video",
+    "videos", "feed", "popular", "viral", "rising", "rise", "growing",
+    "popularity", "engagement", "photo", "photos", "photograph", "picture",
+    "pictures", "shoot", "shooting", "camera", "platform", "accounts",
+    "this", "that", "these", "those", "there", "here", "and", "the", "for",
+    "with", "you", "your", "our", "are", "was", "were", "been", "being",
+    "get", "got", "should", "would", "could", "can", "could", "about",
+    "from", "into", "over", "than", "then", "them", "they", "have", "has",
+    "had", "does", "doing", "please", "help", "like", "likes",
+}
+
+# Topic -> surface forms. These are the subjects a visual-trend question is
+# plausibly about, and the vocabulary is deliberately wider than the current
+# corpus: a question about makeup has to be recognised as makeup even though
+# the current scrape happens to contain almost no makeup. Recognising a topic
+# the corpus cannot answer is what lets the formatter say so, instead of
+# answering a makeup question with fried chicken.
+_TOPIC_LEXICON: dict[str, set[str]] = {
+    "makeup and beauty": {
+        "makeup", "make-up", "beauty", "cosmetics", "cosmetic", "lipstick",
+        "lip", "lips", "foundation", "concealer", "blush", "bronzer",
+        "eyeshadow", "eyeliner", "mascara", "highlighter", "contour",
+        "complexion", "grwm", "getreadywithme", "sephora", "rhode", "glossier",
+        "glam", "makeupartist", "skin", "skincare", "fragrance", "perfume",
+        "nails", "manicure", "brow", "brows", "lash", "lashes", "swatch",
+    },
+    "food": {
+        "food", "dish", "dishes", "meal", "meals", "recipe", "recipes",
+        "cooking", "cook", "baking", "bake", "cuisine", "restaurant", "eat",
+        "eating", "foodie", "chef", "kitchen", "dinner", "lunch", "breakfast",
+        "brunch", "snack", "dessert", "vegan", "vegetarian", "streetfood",
+    },
+    "coffee and drinks": {
+        "coffee", "espresso", "latte", "cappuccino", "barista", "cafe",
+        "café", "coldbrew", "brewing", "drink", "drinks", "cocktail",
+        "smoothie", "juice", "matcha", "tea",
+    },
+    "baking and sweets": {
+        "baking", "bake", "cake", "cakes", "pastry", "pastries", "bread",
+        "cookie", "cookies", "brownie", "cupcake", "pie", "tart", "donut",
+        "donuts", "sweets", "dessert", "icing", "pastry",
+    },
+    "fashion and style": {
+        "fashion", "outfit", "outfits", "style", "styling", "streetwear",
+        "streetstyle", "lookbook", "wardrobe", "suit", "sweater", "denim",
+        "dress", "runway", "parisstreetstyle", "ootd", "grwm",
+    },
+    "travel and outdoors": {
+        "travel", "trip", "vacation", "holiday", "destination", "city",
+        "beach", "mountain", "mountains", "hiking", "hike", "trail", "forest",
+        "lake", "nature", "landscape", "outdoors", "adventure", "camping",
+        "sunset", "sunrise", "architecture", "street",
+    },
+    "fitness and wellness": {
+        "fitness", "workout", "gym", "running", "run", "yoga", "pilates",
+        "wellness", "sport", "sports", "training", "athlete", "marathon",
+    },
+    "pets and animals": {
+        "pet", "pets", "dog", "dogs", "cat", "cats", "puppy", "kitten",
+        "animal", "animals", "bird", "birds", "horse", "panda", "wildlife",
+    },
+    "home and interior": {
+        "home", "interior", "interiors", "room", "furniture", "decor",
+        "architecture", "house", "apartment", "diy", "renovation",
+    },
+    "celebrity and culture": {
+        "celebrity", "netflix", "movie", "film", "tv", "series", "actor",
+        "actress", "singer", "album", "music", "concert", "viral",
+    },
+}
+
+
+def _stem(word: str) -> str:
+    """Very small suffix stripper, enough to match trend/trending/trends."""
+    for suf in ("ing", "ed", "es", "s"):
+        if len(word) > len(suf) + 3 and word.endswith(suf):
+            return word[: -len(suf)]
+    return word
+
+
+def _query_topics(query: str) -> tuple[set[str], set[str]]:
+    """Topics and free tokens the question is actually asking about.
+
+    Returns ``(topics, free_tokens)``. Both empty means the question has no
+    identifiable subject and the caller should not filter at all.
+    """
+    low = query.lower()
+    topics = {
+        topic
+        for topic, terms in _TOPIC_LEXICON.items()
+        if any(re.search(rf"\b{re.escape(term)}\b", low) for term in terms)
+    }
+    free = {
+        _stem(w)
+        for w in re.findall(r"[a-z][a-z'-]{2,}", low)
+        if w not in _GENERIC_QUERY_WORDS
+    }
+    # Tokens already explained by a lexicon hit are not a second, independent
+    # signal; drop them so a single "makeup" cannot match on both counts.
+    for topic in topics:
+        for term in _TOPIC_LEXICON[topic]:
+            free.discard(term)
+            free.discard(_stem(term))
+    return topics, free
+
+
+def _theme_matches(theme: dict, topics: set[str], free_tokens: set[str]) -> bool:
+    """Whether a theme is on-topic for the question.
+
+    A theme matches on a shared lexicon topic, or on a free token shared with
+    the question. Theme names are matched as substrings because cluster names
+    are built from caption keywords and are frequently run together
+    ("povbeauty", "parisianchic") — a word-boundary match would miss those.
+    """
+    name = str(theme.get("name", "")).lower()
+    keywords = " ".join(str(k).lower() for k in (theme.get("keywords") or []))
+    haystack = f"{name} {keywords}"
+
+    for topic, terms in _TOPIC_LEXICON.items():
+        if topic in topics and any(term in haystack for term in terms):
+            return True
+
+    if free_tokens:
+        theme_tokens = {_stem(w) for w in re.findall(r"[a-z][a-z'-]{2,}", haystack)}
+        if free_tokens & theme_tokens:
+            return True
+
+    caption = str(theme.get("blip_caption", "")).lower()
+    if topics and caption:
+        for topic in topics:
+            if any(re.search(rf"\b{re.escape(t)}\b", caption) for t in _TOPIC_LEXICON[topic]):
+                return True
+    return False
+
+
+def _no_coverage_answer(
+    query: str, topics: set[str], free_tokens: set[str], themes: list[dict[str, Any]]
+) -> str:
+    """Honest 'this corpus cannot answer that' instead of an off-topic answer.
+
+    The alternative — quietly returning the top-scoring themes regardless of
+    subject — is what produced a fried-chicken recipe in response to a makeup
+    question. Saying the corpus has no coverage is a correct, actionable
+    answer; the other one is a confident wrong one.
+    """
+    if topics:
+        subject = ", ".join(sorted(topics))
+    elif free_tokens:
+        subject = ", ".join(sorted(free_tokens)[:3])
+    else:
+        subject = "that subject"
+
+    covered: list[str] = []
+    for topic, terms in _TOPIC_LEXICON.items():
+        for theme in themes:
+            haystack = " ".join(
+                [str(theme.get("name", "")).lower()]
+                + [str(k).lower() for k in (theme.get("keywords") or [])]
+            )
+            if any(term in haystack for term in terms):
+                covered.append(topic)
+                break
+    covered_txt = "; ".join(covered) if covered else "no recognised topics"
+    return (
+        f"No theme in the current scrape covers {subject}, so there is nothing "
+        f"measured to report — this corpus only holds {len(themes)} themes, "
+        f"covering {covered_txt}. Adding accounts for that subject to "
+        f"`account.txt` and re-running the collector is what would surface it; "
+        f"until then any answer here would be invented rather than observed."
+    )
+
+
+def _clean_caption_cue(caption: str, limit: int = 80) -> str:
+    """Tidy a BLIP caption for display as an example.
+
+    Captions arrive as raw model output and occasionally contain a token
+    repeated many times ("...topped with a sp of dil dil dil dil dil"), which
+    is meaningless to a reader. Collapse immediate repeats and clip length.
+    """
+    text = " ".join(str(caption or "").split())
+    if not text:
+        return ""
+    out: list[str] = []
+    for word in text.split():
+        if out and out[-1].lower() == word.lower():
+            continue
+        out.append(word)
+    text = " ".join(out)
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0] + "…"
+    return text
+
+
 def format_instagram_trends_answer(query: str, trends: dict[str, Any]) -> str:
     """Concise, actionable answer from Instagram trend data.
 
     For each trend: what it is, and how to recreate it visually.
     No engagement metrics, no example captions — just the trend and how-to.
+
+    TOPIC GATING
+    ------------
+    This formatter is the fallback used when the LLM writing layer is
+    unavailable, so it has to be as selective as the LLM is. It previously
+    filtered themes only when the question contained a preposition
+    ("...about X", "...in X"). "What makeup looks are trending on social
+    media?" has no preposition, so no filter ran and the formatter answered a
+    makeup question with whichever five themes scored highest on
+    ``emerging_score`` — food and celebrity clips. That is a wrong answer, not
+    a vague one, and it is the answer a reader cannot act on.
+
+    Themes are now gated on the question's actual subject, via
+    ``_TOPIC_LEXICON`` plus free-token overlap, and an unmatched subject
+    produces an explicit "no coverage" answer naming what the corpus does
+    cover. Questions with no recognisable subject ("what is trending?") are
+    left unfiltered, which is the correct behaviour for them.
     """
     themes = trends.get("themes") or []
     if not themes:
@@ -207,20 +437,14 @@ def format_instagram_trends_answer(query: str, trends: dict[str, Any]) -> str:
 
     themes = sorted(themes, key=lambda t: t.get("emerging_score", 0), reverse=True)
 
-    # Filter by subject if user mentioned one
-    subject_match = re.search(
-        r"\b(?:about|in|for|of|related to|involving)\s+(.{2,40})", query, re.IGNORECASE
-    )
-    subject = subject_match.group(1).strip() if subject_match else None
-    if subject:
-        subj_tokens = set(re.findall(r"[a-z]{3,}", subject.lower()))
-        def _matches(t: dict) -> bool:
-            kw = {str(x).lower() for x in t.get("keywords", [])}
-            name_tokens = set(re.findall(r"[a-z]{3,}", t.get("name", "").lower()))
-            return bool(subj_tokens & (kw | name_tokens))
-        relevant = [t for t in themes if _matches(t)]
-        if relevant:
-            themes = relevant
+    wanted_topics, wanted_tokens = _query_topics(query)
+    if wanted_topics or wanted_tokens:
+        relevant = [t for t in themes if _theme_matches(t, wanted_topics, wanted_tokens)]
+        if not relevant:
+            return _no_coverage_answer(query, wanted_topics, wanted_tokens, themes)
+        # Keep the unfiltered order (emerging_score) so a narrower question
+        # still surfaces the strongest matching theme first.
+        themes = relevant
 
     def _dirs(t: dict, limit: int = 2) -> list[str]:
         out: list[str] = []
@@ -234,6 +458,24 @@ def format_instagram_trends_answer(query: str, trends: dict[str, Any]) -> str:
             if len(out) >= limit:
                 break
         return out
+
+    def _numbered_steps(t: dict, limit: int = 5) -> list[str]:
+        """
+        Step-by-step shooting instructions derived ONLY from the style tags
+        CLIP measured on this theme's own images. Each step is one fixed line
+        authored in ``src.style_tags.SHOT_STEPS``; no step can appear without a
+        measured tag behind it. Used by the deterministic formatter so users get
+        concrete, actionable direction even when the LLM write layer is
+        unavailable.
+        """
+        recipe = build_shot_recipe(t.get("style_tags", []) or [])
+        steps: list[str] = []
+        for item in recipe:
+            for s in item["steps"]:
+                steps.append(s)
+                if len(steps) >= limit:
+                    return steps
+        return steps
 
     lines: list[str] = []
 
@@ -252,11 +494,15 @@ def format_instagram_trends_answer(query: str, trends: dict[str, Any]) -> str:
         name = t.get("name", "this visual style")
         dirs = _dirs(t)
         cue = "; ".join(dirs) if dirs else ", ".join(str(x) for x in (t.get("keywords") or [])[:3])
-        cap = (t.get("blip_caption") or "").strip().rstrip(".")
+        cap = _clean_caption_cue(t.get("blip_caption", ""))
         cap = re.sub(r"^(a|an|the)\s+", "", cap, flags=re.IGNORECASE)
         if cap:
             cue += f" — e.g. {cap}"
         lines.append(f"{i}. **{name}** — {cue}")
+        steps = _numbered_steps(t)
+        if steps:
+            for j, s in enumerate(steps, 1):
+                lines.append(f"    {i}.{j} {s}")
 
     return "\n".join(lines)
 
@@ -654,10 +900,9 @@ def _load_rag_index() -> None:
         return
 
     import faiss
-    import numpy as np
     from sentence_transformers import SentenceTransformer
 
-    _RAG_TEXT_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    _RAG_TEXT_MODEL = SentenceTransformer(config.RAG_EMBED_MODEL)
     _RAG_TEXT_CHUNKS = _build_text_chunks()
 
     if not _RAG_TEXT_CHUNKS:
@@ -1066,12 +1311,36 @@ def _wants_images(query: str) -> bool:
     return bool(_WANTS_IMAGES.search(query))
 
 
+def _filter_chunks_by_topic(
+    query: str, chunks: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Drop retrieved chunks that are not on the question's subject.
+
+    The RAG index embeds a chunk whose text is mostly style boilerplate and
+    raw captions, so cosine similarity separates clusters far too weakly to be
+    trusted on topic: for "What makeup looks are trending?" the scores spanned
+    0.28-0.59, with a Netflix cooking-show clip (0.589) ranked above the only
+    makeup theme. Those off-topic chunks are handed to the LLM as evidence,
+    which is how a burger theme ends up in a shot plan for a makeup question.
+
+    Only applied when the question names a recognisable subject, and never to
+    the point of returning nothing — an unfiltered result is a better answer
+    than none, and the writing layer can still decline.
+    """
+    topics, free_tokens = _query_topics(query)
+    if not topics and not free_tokens:
+        return chunks
+    kept = [c for c in chunks if _theme_matches(c, topics, free_tokens)]
+    return kept if kept else chunks
+
+
 def run_query(query: str, k: int = 5) -> dict[str, Any]:
     scope = classify_scope(query)
 
     # ── Instagram data path (primary) ──
     ig_trends = load_instagram_trends()
     ig_chunks = retrieve_instagram_chunks(query, k=k) if ig_trends else []
+    ig_chunks = _filter_chunks_by_topic(query, ig_chunks)
 
     if ig_trends and (_live_trend_intent(query) or ig_chunks):
         # Instagram data is available — use it as the primary source
@@ -1094,8 +1363,15 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
             for c in ig_chunks
         ]
 
-        # Try LLM polish for natural language output
+        # Try the LLM writing layer. A failure here used to be swallowed by a
+        # bare `except: pass`, which made a transient network blip or a 429
+        # indistinguishable from a working system: the caller got the
+        # deterministic formatter's output and no indication that the writing
+        # layer had never run. That is how an off-topic fallback answer got
+        # presented as a real one. The fallback is still the right behaviour
+        # (never break the query path), but it now announces itself.
         answer_mode = "rule-based"
+        llm_error: Optional[str] = None
         try:
             from src import llm
 
@@ -1121,8 +1397,20 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
             polished = llm.format_answer_with_llm(query, ig_context)
             if polished:
                 answer, answer_mode = polished, f"llm-{llm.llm_config().get('provider')}"
-        except Exception:  # noqa: BLE001 — fall back to rule-based, never break
-            pass
+            else:
+                llm_error = "no answer returned"
+        except Exception as exc:  # noqa: BLE001 — fall back to rule-based, never break
+            llm_error = f"{type(exc).__name__}: {exc}"
+
+        degraded = bool(llm_error)
+        if degraded:
+            _LOG.warning(
+                "LLM writing layer unavailable (%s) — answering %r with the "
+                "deterministic formatter instead",
+                llm_error,
+                query,
+            )
+            answer_mode = f"rule-based (llm unavailable: {llm_error})"
 
         # Representative images for the retrieved themes (top themes as
         # fallback when nothing cleared the retrieval threshold)
@@ -1139,6 +1427,8 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
             "query": query,
             "answer": answer,
             "answerMode": answer_mode,
+            "degraded": degraded,
+            "degradedReason": llm_error,
             "inScope": True,
             "scopeReason": None,
             "scopeMethod": "instagram-data",
