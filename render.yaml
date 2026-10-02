@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     rootDir: .
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-lite.txt && bash postbuild.sh
     startCommand: python -m src.api
     envVars:
       - key: PYTHON_VERSION

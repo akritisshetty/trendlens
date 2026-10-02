@@ -1,0 +1,7 @@
+# Minimal deps for serving read-only API
+numpy>=1.26,<3.0
+pandas>=2.2,<4.0
+pyarrow>=14.0
+faiss-cpu>=1.8
+Pillow>=10.0
+requests>=2.31
