@@ -1,0 +1,113 @@
+"On this slide you see two screenshots of the working system:
+the homepage on the left and the chat interface on the right.
+
+1) "Model and pipeline optimization"
+   -> "We are tuning the CLIP/UMAP/HDBSCAN pipeline further — e.g.
+      experimenting with bigger CLIP variants and the HDBSCAN
+      min_cluster_size / min_samples sweep to best balance the number
+      of clusters vs noise, and improving the style-tagging coverage
+      for clusters that currently have empty style tags."
+
+2) "Evaluation against baseline models"
+   -> "We already benchmarked against KMeans/t-SNE/PCA/DBSCAN and
+      against real tools (Google-Trends-style keywords, hashtags,
+      engagement lists). Two things remain: expanding the dataset size
+      for more statistically robust numbers, and adding representative
+      images to the retrieval results so answers can 'show' the trend
+      visually, not just describe it."
+
+3) "Deployment of the website"
+   -> "The frontend and API server are built (Flask/FastAPI + React).
+      Remaining work is hosting it online so it can be accessed on a
+      public URL, wiring up persistent storage, and scheduling the
+      data-collector to run daily so trends stay fresh."
+
+--------------------------------------------------------------------
+PART C — WORK PENDING IN PAPER  (slide 19)
+--------------------------------------------------------------------
+PPT lists: Result, Discussion, Conclusion. These are the sections of
+the project report/thesis that are not yet written up.
+
+--------------------------------------------------------------------
+PART D — LIVE DEMO SCRIPT
+--------------------------------------------------------------------
+"Let me show you TrendLens live. You ask it a natural-language
+question about what's trending visually, and it answers using real
+Instagram data with real engagement and growth numbers — grounded, not
+generated from thin air."
+
+--------------------------------------------------------------
+DEMO Q1: "How should I style my hair?"
+--------------------------------------------------------------
+EXPECTED OUTPUT: The system replies around the CURLY HAIR / "cacheada"
+cluster. Explain what you see:
+- "Notice the answer isn't a random guess. The system retrieved the
+  relevant visual cluster — 'natural curls' / curly-hair styling posts —
+  and turned real engagement data into a recommendation. It grouped
+  posts by how they LOOK, not by hashtag."
+
+Say: "TrendLens found that curly-hair and natural-texture styling posts
+make up a distinct visual cluster with rising engagement, so it
+recommends showing natural curl texture."
+
+--------------------------------------------------------------
+DEMO Q2: "What's different about trending cafe content vs
+          restaurant content?"
+--------------------------------------------------------------
+EXPECTED OUTPUT: Cafe = manual latte art (home/technique focus);
+Restaurant = fried chicken spots/reviews. Explain:
+- "See how it separates two very different worlds that both involve
+  food? The cafe cluster is about the CRAFT — latte-art pouring at
+  home. The restaurant cluster is about specific spots and dishes,
+  like the fried-chicken reviews. CLIP separates them by visual
+  content, then retrieval surfaces each one for the comparison."
+- Point out real numbers: e.g. latte-art cluster ~50 posts, ~200k avg
+  likes; fried-chicken cluster ~83 posts. "These are real numbers from
+  actual posts."
+
+--------------------------------------------------------------
+DEMO Q3: "Which country's style is in trend in fashion right now?"
+--------------------------------------------------------------
+EXPECTED OUTPUT: FRENCH / Parisian chic fashion cluster (keywords:
+frenchstyle, parisianchic, parisstreetstyle). Say:
+- "Here it identifies FRENCH Parisian-chic as the fashion aesthetic in
+  the data — again because the images cluster visually around that
+  Parisian/street-style look, before you'd even agree on a hashtag."
+- Optional honest nuance if asked: "Note it also pulled the curly-hair
+  cluster, which shows retrieval can surface multiple related themes."
+
+--------------------------------------------------------------
+DEMO Q4: "What cafe aesthetic is rising this week?"
+--------------------------------------------------------------
+EXPECTED OUTPUT: Manual latte art — rising (growth +25%), 50 posts.
+Explain:
+- "This is the trend-detection at work. Manual latte art has a positive
+  growth rate this week, so it's flagged as rising. The system shows
+  real post counts, growth, and engagement — and you can drill into the
+  example captions."
+- If the number of "rising" themes looks small, don't worry — say:
+  "On our current 10-day scan, latte art is the clearest rising cafe
+  aesthetic; other clusters are stable or declining."
+
+--------------------------------------------------------------
+DEMO Q5: "Write a python code to sort a list."  (OUT-OF-SCOPE)
+--------------------------------------------------------------
+This is the TRAP / scope question. The system should REJECT it.
+Say proactively:
+- "Now watch what happens when someone asks something the system
+  isn't built for — like a programming question."
+EXPECTED OUTPUT: inScope=false; the system says the query is
+out-of-scope (a programming question), and suggests in-scope questions
+instead. Say:
+- "The RAG module has a scope gate. It's not a chatbot that answers
+  anything — it only answers about the visual-trend data. See how it
+  politely refuses and redirects to relevant queries. This prevents it
+  from hallucinating facts it has no evidence for."
+
+--------------------------------------------------------------
+CLOSING LINE for the demo:
+--------------------------------------------------------------
+"To summarize: TrendLens detects visual trends from raw images before
+they have a name — our clusters share almost no keywords — and it lets
+you ask questions in natural language and get evidence-grounded,
+real-data answers. Thank you."

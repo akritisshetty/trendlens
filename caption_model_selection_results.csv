@@ -1,0 +1,3 @@
+model,n_captions,seconds,img_per_s,clipscore,content_words,distinct2,degenerate_frac,empty_frac
+Salesforce/blip-image-captioning-large,60,1516.0,0.04,0.27752544259031614,4.916666666666667,0.9234042553191489,0.0,0.0
+Salesforce/blip-image-captioning-base,60,113.8,0.53,0.2740369965632757,4.883333333333334,0.703862660944206,0.05,0.0

@@ -10,12 +10,17 @@ fraction of the downloaded images (e.g. 152 of ~456), which starved the
 cluster / trend pipeline (few clusters -> weak statistics).
 
 Outputs (same filenames the rest of TrendLens reads):
-  data/instagram/embeddings.npy      (N, 512) float32, L2-normalised, row-aligned
+  data/instagram/embeddings.npy      (N, D) float32, L2-normalised, row-aligned
   data/instagram/embed_meta.parquet  (N) rows matching all_posts columns
+  data/instagram/embeddings_manifest.json  which encoder produced the matrix
+
+The embedding width is whatever ``config.CLIP_MODEL`` produces (512 for
+ViT-B/32, 768 for ViT-L/14) — it is read from the result, never assumed.
 
 Run:  venv/bin/python scripts/rebuild_embeddings.py
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -49,6 +54,7 @@ def main() -> int:
     print(f"[rebuild] {len(posts)} posts total, {len(paths)} with local images")
 
     model, processor, device = load_clip()
+    print(f"[rebuild] encoder: {config.CLIP_MODEL}")
     import torch
 
     embs, keep_idx = [], []
@@ -77,6 +83,17 @@ def main() -> int:
 
     np.save(config.INSTAGRAM_EMBEDDINGS_PATH, emb)
     aligned.to_parquet(config.INSTAGRAM_DIR / "embed_meta.parquet", index=False)
+    config.INSTAGRAM_EMBEDDING_MANIFEST_PATH.write_text(
+        json.dumps(
+            {
+                "model": config.CLIP_MODEL,
+                "dim": int(emb.shape[1]),
+                "n_rows": int(emb.shape[0]),
+                "n_posts_total": int(len(posts)),
+            },
+            indent=1,
+        )
+    )
     print(f"[rebuild] wrote {emb.shape} embeddings + {len(aligned)} metadata rows")
     return 0
 

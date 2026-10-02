@@ -44,3 +44,4 @@ project-report/
 *.log
 .vscode
 .idea
+paper/

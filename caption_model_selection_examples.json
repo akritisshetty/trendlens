@@ -1,0 +1,30 @@
+{
+ "Salesforce/blip-image-captioning-base": [
+  "a woman holding up three boxes of white powder",
+  "a man is picking cher from a bucket",
+  "a man in a red shirt is smiling and holding a microphone",
+  "a bowl of food with a text that reads more eat you guys",
+  "a group of people sitting at a table eating",
+  "a woman holding an umbrella while standing next to a man",
+  "master class - master master master master master master master master master master master master master master master master master master master master master master master master master master master master master master master master master master master master master",
+  "a group of models in a fashion show",
+  "a woman in a blue dress and sunglasses",
+  "a close up of a knife and a knife",
+  "a dog sitting on a bench with tennis balls",
+  "a group of people running down a road"
+ ],
+ "Salesforce/blip-image-captioning-large": [
+  "woman holding two packages of whip it in front of her face",
+  "arafed man kneeling down and picking cherries from a bin",
+  "arafed guy with a microphone and a shirtless shirt on",
+  "there is a bowl of food with a quote on it",
+  "several people sitting at a table with a sandwich and a drink",
+  "araffed woman holding an umbrella while walking down a street",
+  "arafed poster for a master class with a man pouring something",
+  "arafficial image of a group of models standing in front of a black backdrop",
+  "there is a woman standing on a sidewalk with a handbag",
+  "a close up of a purple jacket with a silver zipper",
+  "arafed dog sitting on a bench with tennis balls and a tennis racket",
+  "several people running down a road with their arms in the air"
+ ]
+}

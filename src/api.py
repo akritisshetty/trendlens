@@ -28,7 +28,7 @@ import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import config
 
@@ -88,69 +88,59 @@ def handle_rag_query(payload: dict) -> dict[str, Any]:
 
 
 def handle_trends() -> dict[str, Any]:
-    import pandas as pd
+    """
+    Top trends from the real Instagram pipeline.
 
-    from src import rag
+    Reads the current ``data/instagram/trends.json`` (written by
+    ``scripts/rebuild_trends.py``), which carries the formal trend definition's
+    per-theme verdicts (Rising / InsufficientData), a bounded priority in
+    [0, 1], measured style tags, and a shot recipe path. This replaced the old
+    ``trend_metrics.csv`` endpoint, whose columns came from a legacy synthetic
+    pipeline whose claims the README no longer makes.
+    """
+    from src.rag import load_instagram_trends
 
-    metrics = pd.read_csv(config.CLUSTER_METADATA_DIR / "trend_metrics.csv")
-    metrics = metrics.sort_values(
-        "trend_score_growth_size_stability", ascending=False
-    ).head(20)
-    interpretations = {int(i["cluster_id"]): i for i in rag.load_interpretations()}
-    reps = rag.load_representatives()
-    records = []
-    for _, row in metrics.iterrows():
-        cid = int(row["cluster_id"])
-        it = interpretations.get(cid, {})
-        rep_path = (reps.get(cid) or [{}])[0].get("image_path")
-        records.append(
-            {
-                **row.to_dict(),
-                "name": it.get("name"),
-                "description": it.get("description"),
-                "blip_caption": (it.get("sample_captions") or [""])[0],
-                "representative_image": rep_path,
-                "representative_image_url": rag._image_url(rep_path),
-            }
-        )
-    return {
-        "disclaimer": config.SYNTHETIC_DATA_WARNING,
-        "trends": records,
+    return load_instagram_trends() or {
+        "disclaimer": config.INSTAGRAM_DATA_WARNING,
+        "error": "No Instagram trends yet — run `scripts/rebuild_trends.py` first.",
+        "themes": [],
     }
 
 
 def handle_clusters() -> dict[str, Any]:
-    import pandas as pd
+    """
+    Per-cluster records built from the current trends.json.
 
-    from src import rag
+    Each theme IS a visual cluster in the real pipeline; this endpoint exposes
+    the same objects under a cluster-shaped key for any consumer that expects
+    cluster_id / n_posts / engagement fields.
+    """
+    from src.rag import load_instagram_trends
 
-    interpretations = {int(i["cluster_id"]): i for i in rag.load_interpretations()}
-    reps = rag.load_representatives()
-    metrics = pd.read_csv(config.CLUSTER_METADATA_DIR / "trend_metrics.csv")
-    records = []
-    for _, row in metrics.iterrows():
-        cid = int(row["cluster_id"])
-        it = interpretations.get(cid, {})
-        rep_path = (reps.get(cid) or [{}])[0].get("image_path")
-        records.append(
-            {
-                "cluster_id": cid,
-                "name": it.get("name"),
-                "description": it.get("description"),
-                "characteristics": it.get("characteristics", []),
-                "confidence": it.get("confidence"),
-                "blip_caption": (it.get("sample_captions") or [""])[0],
-                "n_posts": int(row["n_posts"]),
-                "lifecycle": row["lifecycle"],
-                "average_engagement": float(row["average_engagement"]),
-                "recent_growth": float(row["recent_growth"]),
-                "trend_score": float(row["trend_score_growth_size_stability"]),
-                "representative_image": rep_path,
-                "representative_image_url": rag._image_url(rep_path),
-            }
-        )
+    trends = load_instagram_trends()
+    themes = (trends or {}).get("themes") or []
+    records = [
+        {
+            "cluster_id": int(t["cluster_id"]) if "cluster_id" in t else idx,
+            "name": t.get("name"),
+            "description": t.get("description") or t.get("blip_caption"),
+            "n_posts": int(t.get("n_posts", 0)),
+            "classification": t.get("classification"),
+            "priority": t.get("priority") if t.get("priority") is not None
+                          else t.get("emerging_score", 0),
+            "median_likes": t.get("median_likes"),
+            "median_likes_reliable": t.get("median_likes_reliable"),
+            "style_tags": t.get("style_tags", []),
+            "representative_author": t.get("representative_author"),
+            "representative_image_url": (
+                f"/api/instagram-images?name={t['representative_post_id']}"
+                if t.get("representative_post_id") else None
+            ),
+        }
+        for idx, t in enumerate(themes)
+    ]
     return {
-        "disclaimer": config.SYNTHETIC_DATA_WARNING,
+        "disclaimer": config.INSTAGRAM_DATA_WARNING,
         "clusters": records,
     }
 
@@ -163,7 +153,6 @@ def _allowed_representative_paths() -> set[str]:
     global _ALLOWED_PATHS_CACHE
     if _ALLOWED_PATHS_CACHE is not None:
         return _ALLOWED_PATHS_CACHE
-    import json as _json
 
     from src import rag
 
@@ -411,28 +400,60 @@ def handle_predict(payload: dict) -> dict[str, Any]:
     """
     import pandas as pd
 
-    metrics = pd.read_csv(config.CLUSTER_METADATA_DIR / "trend_metrics.csv")
-    cluster_id = payload.get("clusterId")
-    row = None
-    if cluster_id is not None:
-        match = metrics[metrics["cluster_id"] == int(cluster_id)]
-        if len(match):
-            row = match.iloc[0]
+    metrics_path = config.CLUSTER_METADATA_DIR / "trend_metrics.csv"
+    if metrics_path.exists():
+        metrics = pd.read_csv(metrics_path)
+        row = None
+        cluster_id = payload.get("clusterId")
+        if cluster_id is not None:
+            match = metrics[metrics["cluster_id"] == int(cluster_id)]
+            if len(match):
+                row = match.iloc[0]
+        return {
+            "clusterId": None if row is None else int(row["cluster_id"]),
+            "observedMeanEngagement": None if row is None else float(row["average_engagement"]),
+            "observedPostCount": None if row is None else int(row["n_posts"]),
+            "lifecycle": None if row is None else row["lifecycle"],
+            "predictedLikes": None,
+            "predictedComments": None,
+            "predictedTotalEngagement": None,
+            "nMseScore": None,
+            "status": "NOT EVALUATED",
+            "note": "Status: NOT EVALUATED. Popularity prediction model is not "
+            "implemented. These are observed cluster statistics from the 5K demo "
+            "sample (synthetic engagement labels), provided as a reference — no "
+            "prediction is made.",
+        }
 
+    from src.rag import load_instagram_trends
+
+    themes = (load_instagram_trends() or {}).get("themes") or []
+    cluster_id = payload.get("clusterId")
+    theme = None
+    if cluster_id is not None:
+        theme = next(
+            (
+                t
+                for t in themes
+                if int(t.get("cluster_id", -1)) == int(cluster_id)
+            ),
+            None,
+        )
     return {
-        "clusterId": None if row is None else int(row["cluster_id"]),
-        "observedMeanEngagement": None if row is None else float(row["average_engagement"]),
-        "observedPostCount": None if row is None else int(row["n_posts"]),
-        "lifecycle": None if row is None else row["lifecycle"],
+        "clusterId": None if theme is None else int(theme["cluster_id"]),
+        "observedMedianEngagement": (
+            None if theme is None else float(theme["median_likes"])
+        ),
+        "observedPostCount": None if theme is None else int(theme.get("n_posts", 0)),
+        "classification": None if theme is None else theme.get("classification"),
         "predictedLikes": None,
         "predictedComments": None,
         "predictedTotalEngagement": None,
         "nMseScore": None,
         "status": "NOT EVALUATED",
         "note": "Status: NOT EVALUATED. Popularity prediction model is not "
-        "implemented. These are observed cluster statistics from the 5K demo "
-        "sample (synthetic engagement labels), provided as a reference — no "
-        "prediction is made.",
+        "implemented. Observed median engagement from the real Instagram corpus "
+        "is provided as a reference — no prediction is made.",
     }
 
 
@@ -465,12 +486,18 @@ def handle_instagram_image(name: str) -> tuple[bytes | None, str | int]:
     return path.read_bytes(), ctype
 
 
-def handle_instagram_tiles(limit: int = 24) -> dict[str, Any]:
+def handle_instagram_tiles(limit: int = 48) -> dict[str, Any]:
     """
     Tiles for the frontend trend wall: real downloaded Instagram images,
     labelled ONLY from their own post metadata (Apify caption + author +
     account niche). Never labelled with cluster/theme interpretations —
     those describe clusters, not individual images.
+
+    Every request returns a freshly shuffled random sample from the full
+    image library, so the wall shows a different, wide slice of the
+    collected data on each load. The endpoint is served with
+    Cache-Control: no-store (see the route) so the browser never serves a
+    stale, identical set back.
     """
     img_dir = config.INSTAGRAM_IMAGES_DIR
     if not img_dir.is_dir():
@@ -486,11 +513,12 @@ def handle_instagram_tiles(limit: int = 24) -> dict[str, Any]:
 
     import random as _random
 
-    # Shuffle from the full DB so the live wall shows a fresh, rotating
-    # slice of collected Instagram images on every request.
-    _random.shuffle(files)
+    # Random sample from the full library (unique images, no repeats within
+    # a single view). Randomised on every request, not cached by the browser.
     if len(files) > limit:
-        files = files[:limit]
+        files = _random.sample(files, limit)
+    else:
+        _random.shuffle(files)
 
     tiles: list[dict[str, Any]] = []
     for path in files:
@@ -637,14 +665,20 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return  # keep console quiet; optional
 
-    def _send(self, code: int, body: bytes, ctype: str = "application/json"):
+    def _send(self, code: int, body: bytes, ctype: str = "application/json",
+              no_store: bool = False):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Cache-Control", "public, max-age=3600")
+        # no_store => data must never be cached by the browser (e.g. the
+        # randomized trend wall). Everything else can be cached for an hour.
+        self.send_header(
+            "Cache-Control",
+            "no-store" if no_store else "public, max-age=3600",
+        )
         self.end_headers()
         self.wfile.write(body)
 
@@ -697,7 +731,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._serve_instagram_image(self.path)
             elif self.path.startswith("/api/instagram-tiles"):
                 body, code = _json(handle_instagram_tiles())
-                self._send(code, body)
+                # Tiles must change on every manual refresh — never cache.
+                self._send(code, body, no_store=True)
             elif self.path.startswith("/api/instagram-trends"):
                 body, code = _json(handle_instagram_trends())
                 self._send(code, body)

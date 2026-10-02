@@ -1,0 +1,29 @@
+detector,metric,value,note
+TrendLens (visual clusters),assignment_coverage,0.7502,50 groups
+Hashtag-frequency detection,assignment_coverage,0.164932,40 groups
+Keyword/Google-Trends-style,assignment_coverage,0.818255,40 groups
+Engagement trending list,assignment_coverage,0.999199,12 groups
+TrendLens (visual clusters),spearman_pred_vs_actual,0.280814,n_test=576 groups=40
+TrendLens (visual clusters),mae_vs_median_control,53437.478299,control_mae=53591.7 BEATS control
+Hashtag-frequency detection,spearman_pred_vs_actual,-0.061371,n_test=576 groups=17
+Hashtag-frequency detection,mae_vs_median_control,53624.145833,control_mae=53591.7 LOSES to control
+Keyword/Google-Trends-style,spearman_pred_vs_actual,0.140396,n_test=576 groups=40
+Keyword/Google-Trends-style,mae_vs_median_control,53569.659722,control_mae=53591.7 BEATS control
+Engagement trending list,spearman_pred_vs_actual,0.994699,n_test=576 groups=12
+Engagement trending list,mae_vs_median_control,34409.382812,control_mae=53591.7 BEATS control
+TrendLens (visual clusters),trend_precision_at_5,0.0,0/5 claims confirmed
+Hashtag-frequency detection,trend_precision_at_5,0.4,2/5 claims confirmed
+Keyword/Google-Trends-style,trend_precision_at_5,1.0,5/5 claims confirmed
+Engagement trending list,trend_precision_at_5,1.0,5/5 claims confirmed
+TrendLens (visual clusters),mean_hashtag_jaccard,0.025447,n_groups=50
+TrendLens (visual clusters),mean_keyword_jaccard,0.029905,
+Hashtag-frequency detection,mean_hashtag_jaccard,0.483159,n_groups=40
+Hashtag-frequency detection,mean_keyword_jaccard,0.174644,
+Keyword/Google-Trends-style,mean_hashtag_jaccard,0.005285,n_groups=40
+Keyword/Google-Trends-style,mean_keyword_jaccard,0.030303,
+Engagement trending list,mean_hashtag_jaccard,0.004381,n_groups=12
+Engagement trending list,mean_keyword_jaccard,0.010409,
+TrendLens (visual clusters),group_value_cohesion,0.737643,
+Hashtag-frequency detection,group_value_cohesion,0.575227,
+Keyword/Google-Trends-style,group_value_cohesion,0.82709,
+Engagement trending list,group_value_cohesion,0.798892,

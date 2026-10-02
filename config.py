@@ -198,9 +198,87 @@ RANDOM_SEED: int = 42               # deterministic sampling everywhere
 VALID_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 # ──────────────────────────────────────────────────────────────────────────
+# Model selection
+#
+# Every pretrained model the pipeline uses is named HERE and nowhere else, so
+# swapping one cannot leave a second hard-coded copy behind. Before this
+# existed the same CLIP checkpoint string was duplicated in
+# src/embeddings.py, src/style_tags.py, benchmark_algorithms.py and
+# baseline_comparison.py, which is how the style-tag cache came to be written
+# with a model name it never checked against.
+#
+# Each value is chosen by measurement on the real corpus, not by default:
+#   * CLIP   scripts/select_models.py      (see model_selection_summary.json)
+#   * text   scripts/select_text_model.py  (see text_model_selection_results.csv)
+#   * BLIP   scripts/select_caption_model.py
+#
+# Overridable via environment so a sweep can vary them without editing code:
+#   TRENDLENS_CLIP_MODEL / TRENDLENS_RAG_MODEL / TRENDLENS_BLIP_MODEL
+# ──────────────────────────────────────────────────────────────────────────
+
+#: Image+text encoder. Supplies the image embeddings that clustering runs on
+#: AND the text tower used for zero-shot style tagging and cluster naming, so
+#: image and text vectors always share one space.
+#:
+#: Measured over 5 encoders x 18 clustering configurations
+#: (scripts/select_models.py, model_selection_summary.json). ViT-B/32 wins on
+#: the primary metric and on cluster stability; SigLIP2-base was measured too
+#: and did NOT displace it (rho 0.141 vs 0.166, stability ARI 0.56 vs 0.73,
+#: ~2x the encode time), so the newer model family is not automatically better
+#: here. ViT-L/14 is statistically indistinguishable on rho but 3x the encode
+#: cost and slower per-image on CPU, so it was not adopted.
+CLIP_MODEL: str = os.environ.get(
+    "TRENDLENS_CLIP_MODEL", "openai/clip-vit-base-patch32"
+)
+
+#: RAG chunk/query encoder. Separate from CLIP on purpose: it only ever
+#: compares text to text, and the strongest general text-retrieval checkpoint
+#: is not the strongest image-text one.
+#:
+#: Chosen by scripts/select_text_model.py on the project's own retrieval task
+#: (BLIP captions of cluster-member images as queries, the representative
+#: image excluded so no query is a copy of indexed text). Over 6 candidates
+#: bge-base-en-v1.5 wins on every metric — see
+#: text_model_selection_results.csv:
+#:     all-MiniLM-L6-v2 (incumbent)  R@1 0.347  R@3 0.542  MRR 0.502
+#:     BAAI/bge-base-en-v1.5          R@1 0.431  R@3 0.694  MRR 0.590
+#: bge models need no query/passsage prefix (that is an e5-family convention,
+#: handled explicitly in the selection script).
+RAG_EMBED_MODEL: str = os.environ.get(
+    "TRENDLENS_RAG_MODEL", "BAAI/bge-base-en-v1.5"
+)
+
+#: VLM captioner. Supplies the raw captions that cluster names, keywords and
+#: RAG chunk text are derived from — so caption quality is user-visible output,
+#: not an internal detail.
+#:
+#: Chosen by scripts/select_caption_model.py on 60 real corpus images
+#: (caption_model_selection_results.csv):
+#:     blip-image-captioning-base   CLIPScore 0.2740  distinct-2 0.704  5% degenerate
+#:     blip-image-captioning-large  CLIPScore 0.2775  distinct-2 0.923  0% degenerate
+#: The CLIPScore gap is within noise at n=60; the reasons to prefer large are
+#: the markedly higher lexical diversity (cluster names stop repeating each
+#: other in the UI) and the absence of BLIP-base's degenerate repetitions.
+#: The cost is real and is accepted knowingly: large captions at ~0.04 img/s
+#: vs ~0.53 img/s for base, so interpreting ~19 clusters costs roughly half an
+#: hour instead of ~2.5 min. Expect that in the hardware notes.
+BLIP_MODEL: str = os.environ.get(
+    "TRENDLENS_BLIP_MODEL", "Salesforce/blip-image-captioning-large"
+)
+
+#: Sidecar recording which encoder produced embeddings.npy, so a stale artifact
+#: from a different checkpoint is detected instead of silently reused.
+INSTAGRAM_EMBEDDING_MANIFEST_PATH: Path = (
+    INSTAGRAM_DIR / "embeddings_manifest.json"
+)
+
+# ──────────────────────────────────────────────────────────────────────────
 # Image preprocessing
 # ──────────────────────────────────────────────────────────────────────────
-IMAGE_RESIZE: tuple[int, int] = (224, 224)   # CLIP ViT-B/32 native size
+#: 224×224 is the native input of every CLIP checkpoint evaluated by
+#: scripts/select_models.py (ViT-B/32, ViT-B/16, ViT-L/14, SigLIP2-224), so no
+#: candidate is penalised by resampling.
+IMAGE_RESIZE: tuple[int, int] = (224, 224)
 CACHE_VALIDATED_PATHS = True
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -214,6 +292,46 @@ SYNTHETIC_DATA_WARNING = (
     "research findings."
 )
 
+
+# ──────────────────────────────────────────────────────────────────────────
+# Clustering hyperparameters
+#
+# Production values are 15 / 5 / 3, and getting there took two sweeps that
+# disagreed. Both are kept honest below rather than the losing one deleted.
+#
+# scripts/sweep_hyperparameters.py ranked on separation (eta^2) behind a
+# stability gate and landed on 15 / 5 / 3.
+# scripts/select_models.py ranks on mean Spearman rho and nominated
+# 20 / 5 / 3 — but it averaged only five account splits, and its own
+# docstring says five splits is too few to choose on.
+#
+# So the choice was re-measured properly: 80 held-out account splits, the
+# SAME splits scored for every configuration (paired), which removes the
+# split-to-split noise that the 5-seed mean was riding:
+#
+#     UMAP   10   rho 0.170 +- 0.132
+#     UMAP   15   rho 0.248 +- 0.113   <- production
+#     UMAP   20   rho 0.177 +- 0.118
+#
+#   15 vs 20: +0.071, better on 65/80 splits, paired t = 6.96, p = 9e-10
+#   15 vs 10: +0.079, better on 64/80 splits, paired p < 0.001
+#
+# The nominally "selected" 20-d configuration is actually WORSE, and at
+# min_cluster_size=8 — the row select_models.py ranked first — it is worse
+# again (rho 0.084 over 40 splits). Five seeds could not see that.
+# The RAG index, trends and README numbers are all built on 15 / 5 / 3.
+# ──────────────────────────────────────────────────────────────────────────
+UMAP_COMPONENTS = int(os.environ.get("TRENDLENS_UMAP_COMPONENTS", "15"))
+HDBSCAN_MIN_CLUSTER_SIZE = int(
+    os.environ.get("TRENDLENS_HDBSCAN_MIN_CLUSTER_SIZE", "5")
+)
+HDBSCAN_MIN_SAMPLES = int(os.environ.get("TRENDLENS_HDBSCAN_MIN_SAMPLES", "3"))
+HDBSCAN_SELECTION_METHOD = os.environ.get("TRENDLENS_HDBSCAN_METHOD", "eom")
+
+#: RAG retrieval depth. k=5 sits at the knee of the measured curve on this
+#: corpus: hit-rate keeps climbing to k=8 (0.71 -> 0.79) but MRR is flat from
+#: k=5 (0.335 vs 0.345), so k=8 adds context without adding rank quality.
+RAG_RETRIEVAL_K = int(os.environ.get("TRENDLENS_RAG_K", "5"))
 
 # ──────────────────────────────────────────────────────────────────────────
 # Experiment bookkeeping

@@ -15,6 +15,14 @@ export type Briefing = {
   status: "reading" | "done";
   answer?: string;
   live?: boolean;
+  /**
+   * The backend answered, but not with the LLM writing layer — it fell back
+   * to the deterministic formatter. The text is still real measured data, so
+   * it is shown, but it is labelled, because "the model wrote this" and "a
+   * template filled this in from the pipeline" are different claims.
+   */
+  degraded?: boolean;
+  degradedReason?: string | null;
 };
 
 let briefings: Briefing[] = [];
@@ -63,6 +71,8 @@ async function fetchAnswer(query: string, id: number) {
       status: "done",
       answer: typeof data?.answer === "string" ? data.answer : "",
       live: true,
+      degraded: Boolean(data?.degraded),
+      degradedReason: data?.degradedReason ?? null,
     });
   } catch {
     update(id, { status: "done", answer: "", live: false });

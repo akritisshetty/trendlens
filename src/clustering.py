@@ -30,6 +30,33 @@ import config
 # ──────────────────────────────────────────────────────────────────────────
 # Dimensionality reduction
 # ──────────────────────────────────────────────────────────────────────────
+def embedding_fingerprint(embeddings: np.ndarray) -> str:
+    """
+    Cheap content hash of an embedding matrix, used to key caches.
+
+    Row count alone is NOT a sufficient cache key. Every encoder in
+    ``scripts/select_models.py`` produces the same number of rows for the same
+    corpus, so a cache keyed on ``(rows, n_components)`` silently returns the
+    previous checkpoint's UMAP projection when the encoder changes — and
+    HDBSCAN then clusters 768-d image vectors against a projection built from
+    512-d ones. Hashing the bytes makes that a cache miss instead.
+    """
+    import hashlib
+
+    arr = np.ascontiguousarray(np.asarray(embeddings, dtype="float32"))
+    h = hashlib.sha256()
+    h.update(str(arr.shape).encode())
+    # Sample rather than hash every element: this is a cache key, not a
+    # correctness check, and full hashing of a large matrix costs more than the
+    # UMAP fit it would save.
+    flat = arr.reshape(-1)
+    step = max(1, flat.size // 4096)
+    h.update(flat[::step].tobytes())
+    h.update(str(float(flat[0])).encode())
+    h.update(str(float(flat[-1])).encode())
+    return h.hexdigest()[:16]
+
+
 def reduce_dimensions(
     embeddings: np.ndarray,
     method: str = "umap",
@@ -44,13 +71,18 @@ def reduce_dimensions(
     * ``method="pca"``  → sklearn PCA (deterministic)
     * ``method="umap"`` → umap-learn, seeded for reproducibility
 
-    Results are cached to ``cache_path`` (or ``artifacts/embeddings/``)
-    so the expensive UMAP step runs once per config.
+    Results are cached to ``cache_path`` (or ``artifacts/embeddings/``) so the
+    expensive UMAP step runs once per config. The default cache filename embeds
+    a fingerprint of the input matrix, so changing the encoder or the corpus
+    invalidates it automatically.
     """
     emb = np.asarray(embeddings, dtype="float32")
     if cache_path is None:
+        fp = embedding_fingerprint(emb)
         cache_path = (
-            config.ARTIFACTS_DIR / "embeddings" / f"{method}_{n_components}d.npy"
+            config.ARTIFACTS_DIR
+            / "embeddings"
+            / f"{method}_{n_components}d_s{seed if seed is not None else config.RANDOM_SEED}_{fp}.npy"
         )
     cache_path = Path(cache_path)
 

@@ -226,13 +226,17 @@ export default function ChatInterface() {
                         <p className="mb-6 flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-ink-soft">
                           <span
                             className={`h-1.5 w-1.5 rounded-full ${
-                              b.live ? "bg-accent" : "bg-ink-soft/50"
+                              b.live && !b.degraded
+                                ? "bg-accent"
+                                : "bg-ink-soft/50"
                             }`}
                             aria-hidden
                           />
-                          {b.live
-                            ? "assembled from live pipeline data"
-                            : "demo signals — backend offline"}
+                          {b.degraded
+                            ? "measured data — writing layer unavailable, formatted by rule"
+                            : b.live
+                              ? "assembled from live pipeline data"
+                              : "demo signals — backend offline"}
                         </p>
 
                         {/* verdict */}

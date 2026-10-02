@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 import numpy as np
 import pandas as pd
@@ -29,7 +29,9 @@ import config
 # Heavy deps are imported lazily so tests (and `import src.embeddings`)
 # do not require torch/transformers to be installed.
 
-DEFAULT_CLIP_MODEL = "openai/clip-vit-base-patch32"
+#: Single source of truth is ``config.CLIP_MODEL``; re-exported here because
+#: this module is the conventional import site for it.
+DEFAULT_CLIP_MODEL = config.CLIP_MODEL
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -47,17 +49,35 @@ def detect_device(prefer_cuda: bool = True) -> str:
     return "cpu"
 
 
+#: Process-wide CLIP handles, keyed by (model_name, device). `from_pretrained`
+#: performs a blocking HuggingFace Hub metadata request on every call, so
+#: callers that load CLIP per item — e.g. `src.data_collector._clip_text_vec`,
+#: which loads once for every uncached prompt — turn the concept vocabulary
+#: into one network round trip per concept and stall the rebuild stage.
+_CLIP_CACHE: dict[tuple[str, str], tuple[Any, Any, str]] = {}
+
+
 def load_clip(model_name: str = DEFAULT_CLIP_MODEL, device: str | None = None):
-    """Load CLIPModel + CLIPProcessor. Returns (model, processor, device)."""
-    import torch
+    """Load CLIPModel + CLIPProcessor. Returns (model, processor, device).
+
+    Memoized per (model_name, resolved device): the weights are read from disk
+    and moved to the device only on the first call for that pair. The cached
+    model is shared and must not be mutated by callers.
+    """
+    resolved = device or detect_device()
+    key = (model_name, resolved)
+    cached = _CLIP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
     from transformers import CLIPModel, CLIPProcessor
 
-    device = device or detect_device()
     model = CLIPModel.from_pretrained(model_name)
     processor = CLIPProcessor.from_pretrained(model_name)
-    model.to(device)
+    model.to(resolved)
     model.eval()
-    return model, processor, device
+    _CLIP_CACHE[key] = (model, processor, resolved)
+    return _CLIP_CACHE[key]
 
 
 # ──────────────────────────────────────────────────────────────────────────
