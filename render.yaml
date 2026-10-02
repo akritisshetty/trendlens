@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: trendlens-api
+    env: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src.api
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
