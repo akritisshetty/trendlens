@@ -1,6 +1,0 @@
-{
- "model": "openai/clip-vit-base-patch32",
- "dim": 512,
- "n_rows": 1249,
- "n_posts_total": 1453
-}
