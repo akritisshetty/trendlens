@@ -782,7 +782,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 def main():
     host = os.environ.get("TRENDLENS_API_HOST", "0.0.0.0")
-    port = int(os.environ.get("TRENDLENS_API_PORT", "8000"))
+    # Render (and most PaaS providers) inject PORT. Prefer it over the
+    # app-specific variable so the service binds where the platform expects,
+    # while keeping TRENDLENS_API_PORT working for local development.
+    port = int(os.environ.get("PORT") or os.environ.get("TRENDLENS_API_PORT", "8000"))
     server = ThreadingHTTPServer((host, port), _Handler)
     print(f"TrendLens Python backend on http://{host}:{port} (FAISS-only)")
     try:
