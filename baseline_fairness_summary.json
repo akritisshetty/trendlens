@@ -1,0 +1,71 @@
+{
+  "corpus_posts": 1249,
+  "min_trend_size": 10,
+  "permutation_draws": 20000,
+  "detectors": {
+    "Proposed": {
+      "n_groups": 50,
+      "median_group_size": 12.5,
+      "mean_group_size": 18.74,
+      "max_group_size": 134,
+      "coverage_any_group": 0.7502,
+      "coverage_exactly_one_group": 0.7502,
+      "mean_groups_per_post": 0.75,
+      "share_posts_in_multi_groups": 0.0,
+      "groups_below_min_trend_size": 17,
+      "share_posts_in_small_groups": 0.1313,
+      "visual_purity_mean": 0.5895,
+      "visual_purity_size_matched": 0.5895,
+      "permutation_p_vs_proposed": null,
+      "mean_hashtag_jaccard": 0.0253
+    },
+    "Hashtag": {
+      "n_groups": 40,
+      "median_group_size": 6.0,
+      "mean_group_size": 7.8,
+      "max_group_size": 31,
+      "coverage_any_group": 0.1649,
+      "coverage_exactly_one_group": 0.1257,
+      "mean_groups_per_post": 0.25,
+      "share_posts_in_multi_groups": 0.0392,
+      "groups_below_min_trend_size": 33,
+      "share_posts_in_small_groups": 0.6346,
+      "visual_purity_mean": 0.5835,
+      "visual_purity_size_matched": 0.5717,
+      "permutation_p_vs_proposed": 0.3987,
+      "mean_hashtag_jaccard": 0.4832
+    },
+    "Keyword": {
+      "n_groups": 40,
+      "median_group_size": 89.5,
+      "mean_group_size": 112.0,
+      "max_group_size": 375,
+      "coverage_any_group": 0.8183,
+      "coverage_exactly_one_group": 0.1545,
+      "mean_groups_per_post": 3.587,
+      "share_posts_in_multi_groups": 0.6637,
+      "groups_below_min_trend_size": 0,
+      "share_posts_in_small_groups": 0.0,
+      "visual_purity_mean": 0.4234,
+      "visual_purity_size_matched": 0.4775,
+      "permutation_p_vs_proposed": 0.0,
+      "mean_hashtag_jaccard": 0.0054
+    },
+    "Keyword-distinctive": {
+      "n_groups": 5540,
+      "median_group_size": 3.0,
+      "mean_group_size": 6.02,
+      "max_group_size": 61,
+      "coverage_any_group": 0.9944,
+      "coverage_exactly_one_group": 0.0168,
+      "mean_groups_per_post": 26.717,
+      "share_posts_in_multi_groups": 0.9776,
+      "groups_below_min_trend_size": 4680,
+      "share_posts_in_small_groups": 0.489,
+      "visual_purity_mean": 0.4645,
+      "visual_purity_size_matched": 0.4507,
+      "permutation_p_vs_proposed": 0.0,
+      "mean_hashtag_jaccard": 0.0324
+    }
+  }
+}
