@@ -87,17 +87,26 @@ def test_direct_answer_parses_prompts_and_generates_images(monkeypatch, tmp_path
         })
 
     monkeypatch.setattr(chat_ai.requests, "post", fake_post)
-    monkeypatch.setattr(chat_ai, "_pollinations_image", lambda prompt: None)
+    monkeypatch.setattr(
+        chat_ai, "_pollinations_image", lambda prompt, deadline=None: None
+    )
 
     result = chat_ai.chat_query("What food photography trends are rising?")
 
     assert result["degraded"] is False
     assert "IMAGE PROMPTS" not in result["answer"]
     assert result["answer"].startswith("**Verdict:**")
-    assert len(result["supportingImages"]) == 2
+    # Text is returned before any image work starts.
+    assert result["supportingImages"] == []
+    assert result["imagesPending"] is True
     assert result["sources"][0]["url"] == "https://example.com"
     assert result["mode"] == "gemini-direct"
-    for url in result["supportingImages"]:
+
+    images = chat_ai.fetch_images(result["briefingId"])
+
+    assert len(images["supportingImages"]) == 2
+    assert images["imagesPending"] is False
+    for url in images["supportingImages"]:
         name = url.split("name=", 1)[1]
         assert (tmp_path / name).is_file()
 
@@ -134,7 +143,7 @@ def test_falls_back_to_generated_image_service(monkeypatch, tmp_path):
     monkeypatch.setattr(
         chat_ai,
         "_pollinations_image",
-        lambda prompt: (b"x" * 2048, "image/jpeg"),
+        lambda prompt, deadline=None: (b"x" * 2048, "image/jpeg"),
     )
 
     cfg = chat_ai.gemini_config()
@@ -175,13 +184,13 @@ def test_tops_up_prompts_and_images_to_target(monkeypatch):
     monkeypatch.setattr(
         chat_ai,
         "_derive_image_prompts",
-        lambda cfg, query, answer, count: [
+        lambda cfg, query, answer, count, **kwargs: [
             f"extra prompt {i}" for i in range(count)
         ],
     )
     captured = {}
 
-    def fake_generate_image_pairs(cfg, prompts):
+    def fake_generate_image_pairs(cfg, prompts, deadline=None):
         captured["prompts"] = prompts
         return [(prompt, f"/img/{i}.png") for i, prompt in enumerate(prompts)]
 
@@ -189,8 +198,33 @@ def test_tops_up_prompts_and_images_to_target(monkeypatch):
 
     result = chat_ai.chat_query("What food photography trends are rising?")
 
+    assert result["supportingImages"] == []
+    assert result["imagesPending"] is True
+
+    images = chat_ai.fetch_images(result["briefingId"])
+
     assert len(captured["prompts"]) == 6
-    assert len(result["supportingImages"]) == 4
+    assert len(images["supportingImages"]) == 4
+
+
+def test_fetch_images_unknown_briefing_is_graceful():
+    result = chat_ai.fetch_images("does-not-exist")
+
+    assert result["expired"] is True
+    assert result["supportingImages"] == []
+    assert result["imagesPending"] is False
+
+
+def test_chat_query_skips_image_stage_when_disabled(monkeypatch):
+    monkeypatch.setenv("TRENDLENS_GEMINI_API_KEY", "k")
+    monkeypatch.setenv("TRENDLENS_GEMINI_IMAGE_COUNT", "0")
+    monkeypatch.setattr(chat_ai, "_call_text", lambda *args, **kwargs: (TEXT, []))
+
+    result = chat_ai.chat_query("What food photography trends are rising?")
+
+    assert result["supportingImages"] == []
+    assert result["imagesPending"] is False
+    assert result["briefingId"] is None
 
 
 def test_strips_why_it_is_landing_lines():
@@ -250,6 +284,7 @@ def test_legacy_fallback_normalizes_rag_result(monkeypatch):
 
 
 def test_select_relevant_images_keeps_one_per_pattern(monkeypatch, tmp_path):
+    monkeypatch.setenv("TRENDLENS_CHAT_IMAGE_RELEVANCE", "1")
     image = tmp_path / "candidate.png"
     image.write_bytes(b"x" * 2048)
     urls = [f"/api/chat-images?name={i}.png" for i in range(6)]
@@ -284,6 +319,7 @@ def test_yandex_image_urls_parses_orig_urls(monkeypatch):
 
 
 def test_yandex_reference_images_selects_one_per_pattern(monkeypatch, tmp_path):
+    monkeypatch.setenv("TRENDLENS_CHAT_IMAGE_RELEVANCE", "1")
     image = tmp_path / "candidate.jpg"
     image.write_bytes(b"x" * 2048)
     queries = ["q1", "q1b", "q2", "q2b", "q3", "q3b"]
@@ -303,11 +339,13 @@ def test_yandex_reference_images_selects_one_per_pattern(monkeypatch, tmp_path):
     def fake_download(url):
         return "/api/chat-images?name=" + url.rsplit("/", 1)[-1]
 
-    scores = [0.1] * 24
-    scores[1] = 0.9
-    scores[5] = 0.85
-    scores[10] = 0.8
-    scores[19] = 0.7
+    # Candidate order with two downloads per search list:
+    # a0, a1, d0, d1, b0, b1, e0, e1, c0, c1, f0, f1
+    scores = [0.1] * 12
+    scores[1] = 0.9   # a1
+    scores[5] = 0.85  # b1
+    scores[9] = 0.8   # c1
+    scores[3] = 0.7   # d1
 
     monkeypatch.setattr(chat_ai, "_yandex_image_urls", fake_search)
     monkeypatch.setattr(chat_ai, "_download_reference_image", fake_download)
@@ -320,24 +358,8 @@ def test_yandex_reference_images_selects_one_per_pattern(monkeypatch, tmp_path):
 
     assert selected == [
         "/api/chat-images?name=a1.jpg",
-        "/api/chat-images?name=b2.jpg",
-        "/api/chat-images?name=c3.jpg",
-    ]
-
-    scores = [0.1] * 24
-    scores[1] = 0.9
-    scores[10] = 0.8
-    scores[19] = 0.7
-    monkeypatch.setattr(
-        chat_ai, "_clip_image_scores", lambda prompts, paths: scores
-    )
-
-    selected = chat_ai._yandex_reference_images(queries, prompts, 4)
-
-    assert selected == [
-        "/api/chat-images?name=a1.jpg",
-        "/api/chat-images?name=b2.jpg",
-        "/api/chat-images?name=c3.jpg",
+        "/api/chat-images?name=b1.jpg",
+        "/api/chat-images?name=c1.jpg",
     ]
 
 

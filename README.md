@@ -145,7 +145,8 @@ python -m src.api    # serves on port 8000
 ```
 
 **Endpoints:**
-- `POST /api/chat-query` — `{"query": "..."}` → Gemini-only trend answer + 3–4 relevant representative images (food and fashion photography); images are prompt-generated and selected against the answer text
+- `POST /api/chat-query` — `{"query": "..."}` → Gemini-only trend answer (text returns immediately with a `briefingId` and `imagesPending`)
+- `POST /api/chat-briefing-images` — `{"briefingId": "..."}` → the 3–4 relevant representative images for that answer, capped by `TRENDLENS_CHAT_IMAGE_BUDGET`
 - `POST /api/rag-query` — `{"query": "..."}` → answer with evidence from the visual pipeline
 - `GET /api/chat-images?name=` — serve a cached representative chat image
 - `GET /api/health` — service status

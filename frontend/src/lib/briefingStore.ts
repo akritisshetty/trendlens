@@ -29,6 +29,10 @@ export type Briefing = {
    */
   images?: string[];
   imageKind?: "generated" | "reference" | "none";
+  /** Token for the deferred image request (text arrives first). */
+  briefingId?: string;
+  /** Images are still being resolved in a second request. */
+  imagesLoading?: boolean;
 };
 
 let briefings: Briefing[] = [];
@@ -61,9 +65,8 @@ function update(id: number, patch: Partial<Briefing>) {
 async function fetchAnswer(query: string, id: number) {
   try {
     const controller = new AbortController();
-    // A grounded answer plus several generated images can take a few
-    // minutes, so allow the full generation window before aborting.
-    const timer = setTimeout(() => controller.abort(), 300_000);
+    // The text answer is grounded, so allow a generous window for the model.
+    const timer = setTimeout(() => controller.abort(), 120_000);
     const res = await fetch("/api/chat-query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -73,22 +76,60 @@ async function fetchAnswer(query: string, id: number) {
     clearTimeout(timer);
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
+    const initialImages = Array.isArray(data?.supportingImages)
+      ? data.supportingImages.filter((u): u is string => typeof u === "string")
+      : [];
+    const briefingId =
+      typeof data?.briefingId === "string" ? data.briefingId : undefined;
+    const pending = Boolean(data?.imagesPending) && Boolean(briefingId);
+
     update(id, {
       status: "done",
       answer: typeof data?.answer === "string" ? data.answer : "",
       live: true,
       degraded: Boolean(data?.degraded),
       degradedReason: data?.degradedReason ?? null,
-      images: Array.isArray(data?.supportingImages)
-        ? data.supportingImages.filter((u): u is string => typeof u === "string")
-        : undefined,
+      images: initialImages,
       imageKind:
         data?.imageKind === "generated" || data?.imageKind === "reference"
           ? data.imageKind
           : "none",
+      briefingId,
+      imagesLoading: pending,
     });
+
+    if (pending && briefingId) void fetchImages(briefingId, id);
   } catch {
     update(id, { status: "done", answer: "", live: false });
+  }
+}
+
+async function fetchImages(briefingId: string, id: number) {
+  try {
+    const controller = new AbortController();
+    // The backend caps the image stage; this only guards against a dead socket.
+    const timer = setTimeout(() => controller.abort(), 60_000);
+    const res = await fetch("/api/chat-briefing-images", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ briefingId }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    update(id, {
+      images: Array.isArray(data?.supportingImages)
+        ? data.supportingImages.filter((u): u is string => typeof u === "string")
+        : [],
+      imageKind:
+        data?.imageKind === "generated" || data?.imageKind === "reference"
+          ? data.imageKind
+          : "none",
+      imagesLoading: false,
+    });
+  } catch {
+    update(id, { imagesLoading: false });
   }
 }
 

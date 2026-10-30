@@ -13,6 +13,7 @@ Environment:
   TRENDLENS_GEMINI_IMAGE_MODEL    image model (default: gemini-3.1-flash-image)
   TRENDLENS_GEMINI_IMAGE_COUNT    images per answer, 0-12 (default: 4)
   TRENDLENS_GEMINI_SEARCH_GROUNDING  1/0, use Google Search grounding (default: 1)
+  TRENDLENS_CHAT_IMAGE_BUDGET     seconds allowed for the async image stage (default: 15)
 """
 
 from __future__ import annotations
@@ -21,9 +22,16 @@ import base64
 import hashlib
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
+import secrets
+import threading
+import time
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+    as_completed,
+)
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import requests
 
@@ -184,6 +192,42 @@ def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or "").strip() or default
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(_env(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _image_budget() -> float:
+    """Wall-clock seconds allowed for the asynchronous image stage."""
+    try:
+        return max(1.0, float(_env("TRENDLENS_CHAT_IMAGE_BUDGET", "15")))
+    except ValueError:
+        return 15.0
+
+
+def _remaining(deadline: Optional[float], fallback: float) -> float:
+    if deadline is None:
+        return fallback
+    return max(0.0, deadline - time.monotonic())
+
+
+def _relevance_enabled() -> bool:
+    # CLIP scoring is accurate but costs 10-30s on CPU. Off by default so the
+    # async image stage stays fast; enable it with TRENDLENS_CHAT_IMAGE_RELEVANCE=1.
+    return _env("TRENDLENS_CHAT_IMAGE_RELEVANCE", "0").lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
+def _corpus_images_enabled() -> bool:
+    # Semantic corpus search needs a full CLIP pass over the image index.
+    return _env("TRENDLENS_CHAT_CORPUS_IMAGES", "0").lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
 def gemini_config() -> dict[str, Any]:
     api_key = ""
     for var in (
@@ -219,6 +263,92 @@ def gemini_config() -> dict[str, Any]:
 
 def is_enabled() -> bool:
     return bool(gemini_config().get("api_key"))
+
+
+# ── Briefing cache ───────────────────────────────────────────────────────
+# Text is returned immediately; the frontend then asks for the images with the
+# briefing token. The parsed answer and image prompts stay server-side so the
+# image stage reuses exactly what the model produced (and repeats cost nothing).
+_BRIEFINGS: dict[str, dict[str, Any]] = {}
+_BRIEFINGS_LOCK = threading.Lock()
+_BRIEFING_TTL = 15 * 60
+_BRIEFING_MAX = 64
+
+
+def _store_briefing(
+    query: str, answer: str, questions: list[str], prompts: list[str]
+) -> str:
+    token = secrets.token_urlsafe(18)
+    now = time.time()
+    with _BRIEFINGS_LOCK:
+        expired = [
+            key
+            for key, entry in _BRIEFINGS.items()
+            if now - entry["created"] > _BRIEFING_TTL
+        ]
+        for key in expired:
+            _BRIEFINGS.pop(key, None)
+        while len(_BRIEFINGS) >= _BRIEFING_MAX:
+            oldest = min(_BRIEFINGS, key=lambda k: _BRIEFINGS[k]["created"])
+            _BRIEFINGS.pop(oldest, None)
+        _BRIEFINGS[token] = {
+            "query": query,
+            "answer": answer,
+            "questions": list(questions or []),
+            "prompts": list(prompts or []),
+            "created": now,
+            "images": None,
+            "imageKind": "none",
+            "lock": threading.Lock(),
+        }
+    return token
+
+
+def _load_briefing(token: str) -> Optional[dict[str, Any]]:
+    with _BRIEFINGS_LOCK:
+        entry = _BRIEFINGS.get(token)
+        if entry is None:
+            return None
+        if time.time() - entry["created"] > _BRIEFING_TTL:
+            _BRIEFINGS.pop(token, None)
+            return None
+        return entry
+
+
+def _run_with_deadline(
+    tasks: dict[str, tuple[Callable[..., Any], tuple]],
+    deadline: float,
+    stop_when: Optional[Callable[[dict[str, Any]], bool]] = None,
+) -> dict[str, Any]:
+    """Run callables concurrently and collect only what finishes in time.
+
+    ``stop_when`` lets the caller return as soon as the collected results are
+    already sufficient, instead of waiting for slower sources. ``shutdown(
+    wait=False)`` is deliberate: an overdue source must not hold the response
+    open. Its own network timeouts keep the orphaned worker bounded.
+    """
+    if not tasks:
+        return {}
+    results: dict[str, Any] = {}
+    pool = ThreadPoolExecutor(max_workers=len(tasks))
+    futures = {
+        pool.submit(fn, *args): name for name, (fn, args) in tasks.items()
+    }
+    try:
+        remaining = max(0.0, deadline - time.monotonic())
+        for future in as_completed(futures, timeout=remaining):
+            name = futures[future]
+            try:
+                results[name] = future.result()
+            except Exception:  # noqa: BLE001 — one source never sinks the rest
+                results[name] = []
+            if stop_when is not None and stop_when(results):
+                break
+    except FuturesTimeoutError:
+        pass
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    return results
 
 
 def _request(model: str, api_key: str, payload: dict, timeout: int) -> dict:
@@ -257,6 +387,7 @@ def _call_text(
     system_prompt: str,
     user_prompt: str,
     grounding: bool,
+    timeout: int = 90,
 ) -> tuple[str, list[dict[str, str]]]:
     payload: dict[str, Any] = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -271,12 +402,12 @@ def _call_text(
         payload["tools"] = [{"google_search": {}}]
 
     try:
-        data = _request(cfg["model"], cfg["api_key"], payload, timeout=90)
+        data = _request(cfg["model"], cfg["api_key"], payload, timeout=timeout)
     except requests.HTTPError:
         if not use_grounding:
             raise
         payload.pop("tools", None)
-        data = _request(cfg["model"], cfg["api_key"], payload, timeout=90)
+        data = _request(cfg["model"], cfg["api_key"], payload, timeout=timeout)
 
     return _extract_text(data), _extract_sources(data)
 
@@ -402,7 +533,11 @@ def _pattern_headings(answer: str) -> list[tuple[str, str]]:
 
 
 def _derive_image_prompts(
-    cfg: dict[str, Any], query: str, answer: str, count: int
+    cfg: dict[str, Any],
+    query: str,
+    answer: str,
+    count: int,
+    timeout: float = 90,
 ) -> list[str]:
     if count <= 0:
         return []
@@ -422,7 +557,9 @@ def _derive_image_prompts(
         "models are fine. 35-70 words each."
     )
     try:
-        text, _sources = _call_text(cfg, system, user, grounding=False)
+        text, _sources = _call_text(
+            cfg, system, user, grounding=False, timeout=max(1, int(timeout))
+        )
     except Exception:
         return []
     return _parse_prompt_lines(text)[:count]
@@ -452,6 +589,7 @@ def _candidate_prompts(
     prompts: list[str],
     queries: list[str],
     count: int,
+    derive_timeout: float = 90,
 ) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
@@ -464,7 +602,11 @@ def _candidate_prompts(
 
     add(prompts)
     if len(result) < count and len(answer.split()) >= 80:
-        add(_derive_image_prompts(cfg, query, answer, count - len(result)))
+        add(
+            _derive_image_prompts(
+                cfg, query, answer, count - len(result), timeout=derive_timeout
+            )
+        )
     if len(result) < count:
         add(_queries_to_prompts(queries, count - len(result)))
     return result[:count]
@@ -531,16 +673,24 @@ def _save_image(digest: str, raw: bytes, mime: str) -> Optional[str]:
     return f"/api/chat-images?name={path.name}"
 
 
-def _pollinations_image(prompt: str) -> Optional[tuple[bytes, str]]:
+def _pollinations_image(
+    prompt: str, deadline: Optional[float] = None
+) -> Optional[tuple[bytes, str]]:
     """Free prompt-driven image service used before Gemini image generation."""
     from urllib.parse import quote
 
+    timeout = min(
+        _env_int("TRENDLENS_POLLINATIONS_TIMEOUT", 12),
+        _remaining(deadline, 75),
+    )
+    if timeout < 1:
+        return None
     url = POLLINATIONS_URL.format(prompt=quote(prompt, safe=""))
     try:
         response = requests.get(
             url,
             params={"width": 900, "height": 1125, "nologo": "true"},
-            timeout=75,
+            timeout=timeout,
         )
         response.raise_for_status()
     except Exception:
@@ -574,7 +724,11 @@ def _download_reference_image(url: str) -> Optional[str]:
 
         from PIL import Image, ImageOps
 
-        response = requests.get(url, headers=YANDEX_HEADERS, timeout=45)
+        response = requests.get(
+            url,
+            headers=YANDEX_HEADERS,
+            timeout=_env_int("TRENDLENS_IMAGE_DOWNLOAD_TIMEOUT", 8),
+        )
         response.raise_for_status()
         raw = response.content
         if len(raw) < 2048 or len(raw) > 12 * 1024 * 1024:
@@ -617,7 +771,7 @@ def _yandex_image_urls(query: str, limit: int = 6) -> list[str]:
             YANDEX_IMAGES_URL,
             params={"text": query},
             headers=YANDEX_HEADERS,
-            timeout=30,
+            timeout=_env_int("TRENDLENS_YANDEX_TIMEOUT", 6),
         )
         response.raise_for_status()
     except Exception:
@@ -725,11 +879,11 @@ def _yandex_reference_images(
         tasks: list[tuple[int, str]] = []
         for group_index, lists in enumerate(url_lists):
             for urls in lists:
-                for url in urls[:4]:
+                for url in urls[:2]:
                     tasks.append((group_index, url))
         if not tasks:
             return []
-        with ThreadPoolExecutor(max_workers=min(5, len(tasks))) as pool:
+        with ThreadPoolExecutor(max_workers=min(6, len(tasks))) as pool:
             downloaded = list(
                 pool.map(
                     lambda task: (
@@ -754,7 +908,7 @@ def _yandex_reference_images(
 
     scores: Optional[list[float]] = None
     paths = [_image_path_from_url(url) for _group, url in candidates]
-    if all(path is not None for path in paths):
+    if _relevance_enabled() and all(path is not None for path in paths):
         scores = _clip_image_scores(
             [groups[group_index]["text"] for group_index, _url in candidates],
             paths,
@@ -808,7 +962,9 @@ def _yandex_reference_images(
     return [candidates[index][1] for index in chosen]
 
 
-def _generate_one_image(cfg: dict[str, Any], prompt: str) -> Optional[str]:
+def _generate_one_image(
+    cfg: dict[str, Any], prompt: str, deadline: Optional[float] = None
+) -> Optional[str]:
     cached = _cache_path(cfg, prompt)
     if cached is not None:
         return f"/api/chat-images?name={cached.name}"
@@ -817,7 +973,7 @@ def _generate_one_image(cfg: dict[str, Any], prompt: str) -> Optional[str]:
 
     # Pollinations follows the prompt closely. Prefer it, then fall back to
     # Gemini image models when the service is unavailable.
-    service_image = _pollinations_image(prompt)
+    service_image = _pollinations_image(prompt, deadline=deadline)
     if service_image is not None:
         raw, mime = service_image
         url = _save_image(digest, raw, mime)
@@ -835,8 +991,16 @@ def _generate_one_image(cfg: dict[str, Any], prompt: str) -> Optional[str]:
             models.append(fallback)
 
     for model in models:
+        timeout = min(
+            _env_int("TRENDLENS_IMAGE_GEN_TIMEOUT", 20),
+            _remaining(deadline, 120),
+        )
+        if timeout < 1:
+            break
         try:
-            data = _request(model, cfg["api_key"], payload, timeout=120)
+            data = _request(
+                model, cfg["api_key"], payload, timeout=max(1, int(timeout))
+            )
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 429:
@@ -853,14 +1017,19 @@ def _generate_one_image(cfg: dict[str, Any], prompt: str) -> Optional[str]:
 
 
 def _generate_image_pairs(
-    cfg: dict[str, Any], prompts: list[str]
+    cfg: dict[str, Any],
+    prompts: list[str],
+    deadline: Optional[float] = None,
 ) -> list[tuple[str, str]]:
     prompts = [p for p in prompts if p]
     if not prompts:
         return []
-    with ThreadPoolExecutor(max_workers=min(3, len(prompts))) as pool:
+    with ThreadPoolExecutor(max_workers=min(6, len(prompts))) as pool:
         results = list(
-            pool.map(lambda p: (p, _generate_one_image(cfg, p)), prompts)
+            pool.map(
+                lambda p: (p, _generate_one_image(cfg, p, deadline=deadline)),
+                prompts,
+            )
         )
     return [(prompt, url) for prompt, url in results if url]
 
@@ -1076,7 +1245,10 @@ def _clip_image_scores(prompts: list[str], paths: list[Any]) -> Optional[list[fl
 
 
 def _select_relevant_images(
-    urls: list[str], prompts: list[str], limit: int
+    urls: list[str],
+    prompts: list[str],
+    limit: int,
+    deadline: Optional[float] = None,
 ) -> list[str]:
     """Keep one image per pattern, then the best remaining candidates."""
     if limit <= 0 or not urls:
@@ -1086,16 +1258,30 @@ def _select_relevant_images(
         return urls
 
     scores: Optional[list[float]] = None
-    relevance = _env("TRENDLENS_CHAT_IMAGE_RELEVANCE", "1").lower()
     paths = [_image_path_from_url(url) for url in urls]
     if (
-        relevance not in {"0", "false", "no", "off"}
+        _relevance_enabled()
         and all(path is not None for path in paths)
         and all(path.stat().st_size > 1024 for path in paths)
     ):
-        scores = _clip_image_scores(prompts[: len(urls)], paths)
+        # CLIP scoring is nice-to-have. If the budget is nearly gone, or the
+        # scorer itself overruns, fall back to the arrival order rather than
+        # letting a cold model load blow the deadline.
+        if deadline is None or _remaining(deadline, 0) > 1:
+            scored = _run_with_deadline(
+                {"scores": (_clip_image_scores, (prompts[: len(urls)], paths))},
+                deadline if deadline is not None else time.monotonic() + 30,
+            )
+            scores = scored.get("scores")
     if scores is None or len(scores) != len(urls):
-        return urls[:limit]
+        # No CLIP: still prefer one image per pattern (prompts arrive in pairs).
+        chosen = list(range(0, len(urls), 2))
+        for index in range(len(urls)):
+            if len(chosen) >= limit:
+                break
+            if index not in chosen:
+                chosen.append(index)
+        return [urls[index] for index in chosen[:limit]]
 
     groups = [
         list(range(start, min(start + 2, len(urls))))
@@ -1141,6 +1327,8 @@ def _response(
     images: Optional[list[str]] = None,
     image_kind: str = "none",
     sources: Optional[list[dict[str, str]]] = None,
+    briefing_id: Optional[str] = None,
+    images_pending: bool = False,
 ) -> dict[str, Any]:
     return {
         "query": query,
@@ -1154,6 +1342,8 @@ def _response(
         "retrievedClusters": [],
         "supportingImages": images or [],
         "imageKind": image_kind,
+        "briefingId": briefing_id,
+        "imagesPending": images_pending,
         "totalClustersAnalyzed": 0,
         "disclaimer": (
             REFERENCE_DISCLAIMER if image_kind == "reference" else DISCLAIMER
@@ -1197,12 +1387,148 @@ def _legacy_fallback(query: str, reason: str) -> Optional[dict[str, Any]]:
                 images = [images[index] for index in order][:4]
     result["supportingImages"] = images
     result["imageKind"] = "reference" if images else "none"
+    result.setdefault("briefingId", None)
+    result["imagesPending"] = False
     result["degraded"] = True
     result["degradedReason"] = reason
     result["fallback"] = "legacy-faiss"
     result["fallbackReason"] = reason
     result["mode"] = "legacy-fallback"
     return result
+
+
+def _collect_images(
+    cfg: dict[str, Any],
+    query: str,
+    answer: str,
+    questions: list[str],
+    prompts: list[str],
+    target: int,
+) -> tuple[list[str], str]:
+    """Resolve representative images within a hard wall-clock budget.
+
+    Reference search and image generation start together; the first source to
+    fill the target wins, and anything still running when the budget expires is
+    abandoned. This keeps the stage responsive even when a provider is slow.
+    """
+    if target <= 0:
+        return [], "none"
+
+    budget = _image_budget()
+    deadline = time.monotonic() + budget
+
+    candidates = _candidate_prompts(
+        cfg,
+        query,
+        answer,
+        prompts,
+        questions,
+        max(6, target),
+        derive_timeout=min(8.0, budget * 0.3),
+    )
+    if not candidates:
+        return [], "none"
+
+    tasks: dict[str, tuple[Callable[..., Any], tuple]] = {
+        "yandex": (
+            _yandex_reference_images,
+            (questions, candidates, target, _pattern_headings(answer)),
+        ),
+        "generated": (
+            _generate_image_pairs,
+            (cfg, candidates, deadline),
+        ),
+    }
+    if _corpus_images_enabled():
+        tasks["corpus"] = (
+            _corpus_reference_images,
+            (candidates, target, query),
+        )
+
+    def references(collected: dict[str, Any]) -> list[str]:
+        return list(
+            dict.fromkeys(
+                (collected.get("yandex") or [])
+                + (collected.get("corpus") or [])
+            )
+        )
+
+    def generated(collected: dict[str, Any]) -> list[str]:
+        return [url for _prompt, url in (collected.get("generated") or [])]
+
+    def assemble(collected: dict[str, Any]) -> list[str]:
+        return list(dict.fromkeys(references(collected) + generated(collected)))
+
+    results = _run_with_deadline(
+        tasks,
+        deadline,
+        stop_when=lambda collected: len(assemble(collected)) >= target,
+    )
+
+    reference_images = references(results)
+    pairs = results.get("generated") or []
+    generated_images = _select_relevant_images(
+        [url for _prompt, url in pairs],
+        [prompt for prompt, _url in pairs],
+        target,
+        deadline=deadline,
+    )
+    images = list(
+        dict.fromkeys(reference_images + generated_images)
+    )[:target]
+    if reference_images:
+        image_kind = "reference"
+    elif images:
+        image_kind = "generated"
+    else:
+        image_kind = "none"
+    return images, image_kind
+
+
+def fetch_images(briefing_id: str) -> dict[str, Any]:
+    """Return the images for an already-delivered text answer.
+
+    Called by the frontend after the answer is on screen. Results are memoised
+    on the briefing, so a retry is instant.
+    """
+    entry = _load_briefing(briefing_id)
+    if entry is None:
+        return {
+            "briefingId": briefing_id,
+            "supportingImages": [],
+            "imageKind": "none",
+            "imagesPending": False,
+            "expired": True,
+        }
+
+    lock = entry.get("lock")
+    if lock is None:
+        lock = threading.Lock()
+        entry["lock"] = lock
+    with lock:
+        if entry.get("images") is None:
+            cfg = gemini_config()
+            target = cfg["image_count"]
+            if not cfg["api_key"] or target <= 0:
+                images, image_kind = [], "none"
+            else:
+                images, image_kind = _collect_images(
+                    cfg,
+                    entry["query"],
+                    entry["answer"],
+                    entry["questions"],
+                    entry["prompts"],
+                    target,
+                )
+            entry["images"] = images
+            entry["imageKind"] = image_kind
+        return {
+            "briefingId": briefing_id,
+            "supportingImages": entry["images"],
+            "imageKind": entry["imageKind"],
+            "imagesPending": False,
+            "expired": False,
+        }
 
 
 def chat_query(query: str) -> dict[str, Any]:
@@ -1267,52 +1593,22 @@ def chat_query(query: str) -> dict[str, Any]:
     answer = _strip_why_lines(answer)
     answer = _strip_styling_advice(answer)
 
+    # Return the text now. The browser asks for the representative images in a
+    # second, non-blocking request so a slow image source cannot delay the answer.
     target_images = cfg["image_count"]
-    if target_images:
-        candidates = _candidate_prompts(
-            cfg,
-            query,
-            answer,
-            prompts,
-            questions,
-            max(6, target_images),
-        )
-        images = _yandex_reference_images(
-            questions,
-            candidates,
-            target_images,
-            _pattern_headings(answer),
-        )
-        if len(images) < min(3, target_images):
-            images = list(
-                dict.fromkeys(
-                    images
-                    + _corpus_reference_images(
-                        candidates, target_images, query
-                    )
-                )
-            )[:target_images]
-        reference_images = images
-        image_kind = "reference" if reference_images else "none"
-        if len(images) < min(3, target_images):
-            pairs = _generate_image_pairs(cfg, candidates)
-            generated = _select_relevant_images(
-                [url for _prompt, url in pairs],
-                [prompt for prompt, _url in pairs],
-                target_images,
-            )
-            if generated:
-                images = list(dict.fromkeys(images + generated))[:target_images]
-                image_kind = "reference" if reference_images else "generated"
-    else:
-        images = []
-        image_kind = "none"
+    briefing_id = (
+        _store_briefing(query, answer, questions, prompts)
+        if target_images
+        else None
+    )
 
     return _response(
         query,
         answer,
         answer_mode="gemini-direct",
-        images=images,
-        image_kind=image_kind,
+        images=[],
+        image_kind="none",
         sources=sources,
+        briefing_id=briefing_id,
+        images_pending=bool(briefing_id),
     )

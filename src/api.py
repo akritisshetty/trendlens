@@ -71,6 +71,8 @@ def handle_health() -> dict[str, Any]:
         "timestamps": timestamps,
         "mode": "faiss-only",
         "llmEnabled": False,
+        # Lets clients confirm they are talking to the text-first build.
+        "chatImagesDeferred": True,
         "timestamp": pd.Timestamp.now("UTC").isoformat(),
     }
 
@@ -96,6 +98,15 @@ def handle_chat_query(payload: dict) -> dict[str, Any]:
     if not query or not isinstance(query, str):
         raise ValueError("Valid query text is required")
     return chat_ai.chat_query(query)
+
+
+def handle_chat_briefing_images(payload: dict) -> dict[str, Any]:
+    from src import chat_ai
+
+    briefing_id = payload.get("briefingId")
+    if not briefing_id or not isinstance(briefing_id, str):
+        raise ValueError("Valid briefingId is required")
+    return chat_ai.fetch_images(briefing_id)
 
 
 def handle_trends() -> dict[str, Any]:
@@ -804,6 +815,8 @@ class _Handler(BaseHTTPRequestHandler):
                 body, code = _json(handle_rag_query(payload))
             elif self.path.startswith("/api/chat-query"):
                 body, code = _json(handle_chat_query(payload))
+            elif self.path.startswith("/api/chat-briefing-images"):
+                body, code = _json(handle_chat_briefing_images(payload))
             elif self.path.startswith("/api/auth/signup"):
                 body, code = _json(handle_auth_signup(payload))
             elif self.path.startswith("/api/auth/login"):

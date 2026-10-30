@@ -258,6 +258,14 @@ export default function ChatInterface() {
                             {b.images && b.images.length > 0 && (
                               <ReferenceImages urls={b.images} />
                             )}
+                            {b.imagesLoading && (
+                              <p
+                                className="mt-6 text-[11px] uppercase tracking-[0.25em] text-ink-soft"
+                                role="status"
+                              >
+                                fetching reference images…
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <p className="max-w-2xl border border-line bg-paper-deep p-4 text-base text-ink/80">

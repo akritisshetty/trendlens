@@ -34,6 +34,10 @@ class TestHandlers:
         with pytest.raises(ValueError):
             api.handle_rag_query({})
 
+    def test_chat_briefing_images_requires_id(self):
+        with pytest.raises(ValueError):
+            api.handle_chat_briefing_images({})
+
     @_requires_legacy
     def test_rag_query_runs(self, monkeypatch):
         # Uses the real pipeline on the real index (small, cached artifacts).
