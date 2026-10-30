@@ -58,6 +58,7 @@ _load_dotenv(ROOT / ".env")
 # ──────────────────────────────────────────────────────────────────────────
 
 DATA_DIR = ROOT / "data"
+CHAT_IMAGES_DIR = DATA_DIR / "chat_images"
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 EMBEDDINGS_DIR = DATA_DIR / "embeddings"
@@ -147,6 +148,7 @@ INSTAGRAM_DATA_WARNING = (
 )
 
 for _d in (
+    CHAT_IMAGES_DIR,
     RAW_DIR,
     PROCESSED_DIR,
     EMBEDDINGS_DIR,

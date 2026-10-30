@@ -11,6 +11,54 @@ export type BlogPost = {
 
 export const BLOG_POSTS: BlogPost[] = [
   {
+    slug: "dogue-on-the-feed",
+    title: "Dogue on the feed: the dog trend breaking the internet from a wooden table",
+    excerpt:
+      "Sixteen hashtag mentions, seventeen images that all rhyme, and the highest-engagement cluster in our corpus. How a dog at a candlelit table became a trend before anyone agreed what to call it.",
+    category: "From the data",
+    date: "Oct 8, 2026",
+    readingTime: "4 min read",
+    body: [
+      "Every aesthetic eventually gets a name — but this one got a magazine. Over the last ten days our feed has filled up with dogs at tables: the same low magazine-cover angle, the same plate of spaghetti, the same absolutely serious expression. No caption needed. The pictures rhyme on their own.",
+      "The numbers are striking precisely because they're unglamorous. The #dogue hashtag only appeared sixteen times in the scanned window. Sixteen — smaller than #coffee, smaller than the awards-show noise. But those sixteen posts cluster into one unmistakable look, and that look sits in the highest-engagement corner of our corpus right now: the cluster averages nearly 189,000 likes.",
+      "We never needed the word to see it, which is the whole point. When enough images rhyme they form a group on their own, on the machine's side, before any search engine has a label to offer. Here the hashtag arrived in the same window as the pictures — but the pictures had already been grouped before a single one of us typed anything.",
+      "Our model's nickname for the cluster is almost absurdly cautious: 'book or magazine cover photographed flat.' That's the honest part of the system guessing, and we'll keep the guessing honest. The growth part is real: seventeen posts, the best engagement we've logged in weeks, and a look so specific it's basically a brand.",
+      "A dog with a glass of wine is a vibe pretending to be a prediction. But watch the shape, not the joke: small volume, huge pull, one repeating visual grammar. That is exactly how a trend sounds while it's still starting — before the internet has decided whether to take it seriously.",
+    ],
+  },
+  {
+    slug: "paris-fashion-week-by-the-pictures",
+    title: "Paris fashion week, read by the pictures",
+    excerpt:
+      "Runway photography is the strongest emerging signal in this fortnight's feed — 58 posts, roughly 67,000 likes a piece, and the calendar to explain it.",
+    category: "From the data",
+    date: "Oct 6, 2026",
+    readingTime: "5 min read",
+    body: [
+      "For the last ten days the feed has been doing fashion week, whether or not it planned to. Runway photographs are our single strongest emerging signal this fortnight: one cluster alone logged 58 posts averaging roughly 67,000 likes, and the emerging scores the machine assigns to those clusters are the highest in the corpus.",
+      "The hashtags tell the same story in words — #parisfashionweek showed up seventeen times, a hair behind #coffee and #vmas. But the words just confirm what the pictures were already shouting: the same eye-level framing, the same muted desaturated palette, the same crowd silhouettes, the same felt-lined backstage.",
+      "What's interesting is that runway week doesn't cluster like a viral trend. It comes in bursts tied to the show calendar — five or six distinct runway clusters form at once instead of one big slow climb. That's the signature of an event trend: loud, concentrated, calendar-driven, as opposed to the organic hum we usually chase.",
+      "It's also a photographer's trend before it's a consumer one. The style tags — eye-level straight-on, natural window light, the muted palette — describe how the shots are taken more than what's in them. Fashion week on the feed is a document of the room, not the clothes.",
+      "If you want practice spotting what's actually starting, event trends are the easiest case: they're the simplest to see and the simplest to misread as organic. The lens says scale them to the calendar, not to a growth curve. The pictures agreed on the look; the calendar explains the timing.",
+    ],
+  },
+  {
+    slug: "the-quiet-cluster-watching",
+    title: "The quiet cluster worth watching: wildlife photos are pulling without a word",
+    excerpt:
+      "37 posts, around 69,000 likes each, and barely a hashtag between them. How the second-highest-engagement story in the feed stayed invisible to word-based tools.",
+    category: "From the data",
+    date: "Oct 4, 2026",
+    readingTime: "5 min read",
+    body: [
+      "Not every rising thing is loud. The second-highest-engagement corner of this month's feed is a quiet one: wildlife and animals in their natural habitat, 37 posts averaging around 69,000 likes — behind only a dog that went viral for sitting still.",
+      "The hashtags around it are just as understated. #rolex and #perpetualplanet each turned up ten times, attached to the same handful of accounts. On a word-based tool that looks like nothing. On the visual feed it looks like a pattern: a whale tail off the side of a mountain, rainforest undergrowth, the same natural window light and muted palette.",
+      "This is the shape we're always looking for. Small volume. Above-average pull. One repeating visual grammar that hasn't been given a name yet. Volume alone lies — a flat count can mean a niche at rest — but engagement on a small, consistent cluster is the classic signature of a trend still finding its footing.",
+      "We can't tell you this is about to blow up; that would be a fashion week-sized prediction. But we can tell you the machine grouped these images on its own, that the engagement is real, and that nobody who searched the occasional hashtag would have noticed anything at all.",
+      "The lesson keeps repeating: the loudest thing on the feed is rarely the most interesting thing on the feed. Runway week is easy. The quiet cluster — the one with no agreed name and a hum that's only just audible — is the one worth watching.",
+    ],
+  },
+  {
     slug: "desserts-on-the-feed",
     title: "Desserts on the feed: from micro-batch baking to viral cookie shops",
     excerpt:

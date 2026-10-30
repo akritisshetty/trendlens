@@ -19,10 +19,10 @@ import {
    ──────────────────────────────────────────────────────────────── */
 
 const SAMPLE_QUERIES = [
-  "What cafe aesthetic is rising this week?",
-  "What kind of latte art gets the most engagement?",
-  "What makeup looks are trending on social media?",
-  "Which photography styles are going viral?",
+  "What food photography trends are rising right now?",
+  "What fashion photography styles are trending?",
+  "How should I shoot the latest food aesthetic?",
+  "Which fashion styling looks are trending this season?",
 ];
 
 /* ── sub components ── */
@@ -40,7 +40,7 @@ function ReadingIndicator() {
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
         <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
       </span>
-      reading the last 10 days of posts…
+      reading current trend signals…
     </motion.div>
   );
 }
@@ -94,6 +94,35 @@ function Markdown({ text }: { text: string }) {
   );
 }
 
+function ReferenceImages({ urls }: { urls: string[] }) {
+  return (
+    <div className="mt-10">
+      <p className="mb-3 text-[11px] uppercase tracking-[0.25em] text-ink-soft">
+        Representative reference images
+      </p>
+      <div className="grid grid-cols-4 gap-2 sm:gap-3">
+        {urls.slice(0, 4).map((src, i) => (
+          <motion.div
+            key={src}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 + i * 0.06 }}
+            className="aspect-[4/5] overflow-hidden rounded-sm bg-paper-deep"
+          >
+            <img
+              src={src}
+              alt={`Representative visual ${i + 1}`}
+              loading="lazy"
+              draggable={false}
+              className="h-full w-full select-none object-cover"
+            />
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ── main component ── */
 
 export default function ChatInterface() {
@@ -118,8 +147,8 @@ export default function ChatInterface() {
               The Lens
             </h1>
             <p className="max-w-xs text-xs leading-relaxed text-ink-soft">
-              File a query. Get back a grounded trend insight — not
-              opinions.
+              File a query about food or fashion photography. Find what's
+              moving now.
             </p>
           </div>
 
@@ -186,7 +215,7 @@ export default function ChatInterface() {
               >
                 ask what's rising
               </button>
-              . The lens reads the feed, not the internet.
+              . The lens finds what's moving right now.
             </p>
           </div>
         ) : (
@@ -208,7 +237,7 @@ export default function ChatInterface() {
                       Q{String(b.seq).padStart(2, "0")}
                     </span>
                     <h2 className="font-display text-2xl font-semibold italic leading-tight text-ink md:text-4xl">
-                      "{b.query}"
+                      {b.query}
                     </h2>
                   </div>
 
@@ -222,33 +251,18 @@ export default function ChatInterface() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.5 }}
                       >
-                        {/* provenance stamp */}
-                        <p className="mb-6 flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-ink-soft">
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              b.live && !b.degraded
-                                ? "bg-accent"
-                                : "bg-ink-soft/50"
-                            }`}
-                            aria-hidden
-                          />
-                          {b.degraded
-                            ? "measured data — writing layer unavailable, formatted by rule"
-                            : b.live
-                              ? "assembled from live pipeline data"
-                              : "demo signals — backend offline"}
-                        </p>
-
                         {/* verdict */}
                         {b.live ? (
                           <div className="max-w-2xl text-base text-ink/90 md:text-lg">
                             <Markdown text={b.answer ?? ""} />
+                            {b.images && b.images.length > 0 && (
+                              <ReferenceImages urls={b.images} />
+                            )}
                           </div>
                         ) : (
                           <p className="max-w-2xl border border-line bg-paper-deep p-4 text-base text-ink/80">
-                            Couldn't reach the backend for this query — the
-                            pipeline may still be reading. Give it a moment
-                            and file it again.
+                            Couldn't reach the backend for this query. Check
+                            the server and file it again.
                           </p>
                         )}
                       </motion.div>

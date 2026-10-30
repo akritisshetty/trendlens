@@ -9,6 +9,8 @@ pipeline artifacts:
 
   GET  /api/health              service status
   POST /api/rag-query           {query} -> {answer, retrievedClusters, ...}
+  POST /api/chat-query          {query} -> Gemini-only answer + representative images
+  GET  /api/chat-images?name=   serve a Gemini-generated chat image
   GET  /api/trends              top trends from trend_metrics.csv
   GET  /api/clusters            all cluster interpretations + metrics
   GET  /api/images?path=...     serve a whitelisted representative image
@@ -85,6 +87,15 @@ def handle_rag_query(payload: dict) -> dict[str, Any]:
     except (TypeError, ValueError):
         k = 5
     return rag.run_query(query, k=k)
+
+
+def handle_chat_query(payload: dict) -> dict[str, Any]:
+    from src import chat_ai
+
+    query = payload.get("query")
+    if not query or not isinstance(query, str):
+        raise ValueError("Valid query text is required")
+    return chat_ai.chat_query(query)
 
 
 def handle_trends() -> dict[str, Any]:
@@ -486,6 +497,21 @@ def handle_instagram_image(name: str) -> tuple[bytes | None, str | int]:
     return path.read_bytes(), ctype
 
 
+def handle_chat_image(name: str) -> tuple[bytes | None, str | int]:
+    """Serve a Gemini-generated chat image by whitelisted basename."""
+    import mimetypes
+
+    name = (name or "").strip()
+    if not name or name != Path(name).name:
+        return None, 404
+    path = (config.CHAT_IMAGES_DIR / name).resolve()
+    img_dir = config.CHAT_IMAGES_DIR.resolve()
+    if not str(path).startswith(str(img_dir)) or not path.is_file():
+        return None, 404
+    ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    return path.read_bytes(), ctype
+
+
 def handle_instagram_tiles(limit: int = 48) -> dict[str, Any]:
     """
     Tiles for the frontend trend wall: real downloaded Instagram images,
@@ -725,9 +751,22 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send(200, body, ctype)
 
+    def _serve_chat_image(self, path: str):
+        from urllib.parse import parse_qs, urlparse
+
+        query = parse_qs(urlparse(path).query)
+        name = (query.get("name") or [""])[0]
+        body, ctype = handle_chat_image(name)
+        if body is None:
+            self._send(404, json.dumps({"error": "Chat image not found"}).encode("utf-8"))
+            return
+        self._send(200, body, ctype)
+
     def do_GET(self):
         try:
-            if self.path.startswith("/api/instagram-images"):
+            if self.path.startswith("/api/chat-images"):
+                self._serve_chat_image(self.path)
+            elif self.path.startswith("/api/instagram-images"):
                 self._serve_instagram_image(self.path)
             elif self.path.startswith("/api/instagram-tiles"):
                 body, code = _json(handle_instagram_tiles())
@@ -763,6 +802,8 @@ class _Handler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if self.path.startswith("/api/rag-query"):
                 body, code = _json(handle_rag_query(payload))
+            elif self.path.startswith("/api/chat-query"):
+                body, code = _json(handle_chat_query(payload))
             elif self.path.startswith("/api/auth/signup"):
                 body, code = _json(handle_auth_signup(payload))
             elif self.path.startswith("/api/auth/login"):

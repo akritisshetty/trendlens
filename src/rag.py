@@ -224,6 +224,13 @@ _GENERIC_QUERY_WORDS = {
     "get", "got", "should", "would", "could", "can", "could", "about",
     "from", "into", "over", "than", "then", "them", "they", "have", "has",
     "had", "does", "doing", "please", "help", "like", "likes",
+    # Interrogative/quantifier filler that carries no subject ("what KIND of
+    # latte art", "which style GETS the MOST engagement"). These used to leak
+    # into free-token matching and drag off-topic themes into coffee and
+    # makeup answers.
+    "kind", "kinds", "type", "types", "sort", "sorts", "gets", "got",
+    "most", "more", "best", "better", "other", "else", "anyone", "everyone",
+    "would", "way", "ways", "want", "wanna", "need", "trying", "try",
 }
 
 # Topic -> surface forms. These are the subjects a visual-trend question is
@@ -408,6 +415,25 @@ def _clean_caption_cue(caption: str, limit: int = 80) -> str:
     return text
 
 
+def _screen_instagram_themes(
+    query: str, themes: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str], set[str]]:
+    """Single source of truth for which themes a named query is about.
+
+    Returns ``(screened, full_sorted, wanted_topics, wanted_tokens)``:
+    ``screened`` is the themes the answer will actually cite, restricted to
+    the question's subject (empty when a subject is named but nothing in the
+    corpus covers it); ``full_sorted`` is the same list by emerging score
+    without the topic gate, used for the no-coverage note.
+    """
+    full = sorted(themes, key=lambda t: t.get("emerging_score", 0), reverse=True)
+    wanted_topics, wanted_tokens = _query_topics(query)
+    if wanted_topics or wanted_tokens:
+        relevant = [t for t in full if _theme_matches(t, wanted_topics, wanted_tokens)]
+        return relevant, full, wanted_topics, wanted_tokens
+    return full, full, wanted_topics, wanted_tokens
+
+
 def format_instagram_trends_answer(query: str, trends: dict[str, Any]) -> str:
     """Concise, actionable answer from Instagram trend data.
 
@@ -435,16 +461,9 @@ def format_instagram_trends_answer(query: str, trends: dict[str, Any]) -> str:
     if not themes:
         return "No trend data available yet. Run the pipeline first."
 
-    themes = sorted(themes, key=lambda t: t.get("emerging_score", 0), reverse=True)
-
-    wanted_topics, wanted_tokens = _query_topics(query)
-    if wanted_topics or wanted_tokens:
-        relevant = [t for t in themes if _theme_matches(t, wanted_topics, wanted_tokens)]
-        if not relevant:
-            return _no_coverage_answer(query, wanted_topics, wanted_tokens, themes)
-        # Keep the unfiltered order (emerging_score) so a narrower question
-        # still surfaces the strongest matching theme first.
-        themes = relevant
+    themes, full_themes, wanted_topics, wanted_tokens = _screen_instagram_themes(query, themes)
+    if (wanted_topics or wanted_tokens) and not themes:
+        return _no_coverage_answer(query, wanted_topics, wanted_tokens, full_themes)
 
     def _dirs(t: dict, limit: int = 2) -> list[str]:
         out: list[str] = []
@@ -1412,16 +1431,15 @@ def run_query(query: str, k: int = 5) -> dict[str, Any]:
             )
             answer_mode = f"rule-based (llm unavailable: {llm_error})"
 
-        # Representative images for the retrieved themes (top themes as
-        # fallback when nothing cleared the retrieval threshold)
-        theme_names = [c.get("name") for c in ig_chunks if c.get("name")] or [
-            t.get("name")
-            for t in sorted(
-                ig_trends.get("themes") or [],
-                key=lambda t: t.get("emerging_score", 0),
-                reverse=True,
-            )[:4]
-        ]
+        # Representative images for the themes the answer actually cites.
+        # These must come from the *same* topic-screened list the formatter
+        # used — otherwise a coffee question can get runway or burger photos,
+        # because the RAG retrieval over style boilerplate separates subjects
+        # far too weakly to be trusted on topic.
+        answer_themes, _full, _topics, _tokens = _screen_instagram_themes(
+            query, ig_trends.get("themes") or []
+        )
+        theme_names = [t.get("name") for t in answer_themes[:4] if t.get("name")]
 
         return {
             "query": query,

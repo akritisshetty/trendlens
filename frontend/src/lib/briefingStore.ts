@@ -23,6 +23,12 @@ export type Briefing = {
    */
   degraded?: boolean;
   degradedReason?: string | null;
+  /**
+   * Representative visuals for the answer. Shown alongside the text so
+   * the reader sees the look, not only reads about it.
+   */
+  images?: string[];
+  imageKind?: "generated" | "reference" | "none";
 };
 
 let briefings: Briefing[] = [];
@@ -55,10 +61,10 @@ function update(id: number, patch: Partial<Briefing>) {
 async function fetchAnswer(query: string, id: number) {
   try {
     const controller = new AbortController();
-    // RAG + LLM generation can take well over 30s on a cold pipeline —
-    // give it room instead of falling back to demo text prematurely.
-    const timer = setTimeout(() => controller.abort(), 90_000);
-    const res = await fetch("/api/rag-query", {
+    // A grounded answer plus several generated images can take a few
+    // minutes, so allow the full generation window before aborting.
+    const timer = setTimeout(() => controller.abort(), 300_000);
+    const res = await fetch("/api/chat-query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
@@ -73,6 +79,13 @@ async function fetchAnswer(query: string, id: number) {
       live: true,
       degraded: Boolean(data?.degraded),
       degradedReason: data?.degradedReason ?? null,
+      images: Array.isArray(data?.supportingImages)
+        ? data.supportingImages.filter((u): u is string => typeof u === "string")
+        : undefined,
+      imageKind:
+        data?.imageKind === "generated" || data?.imageKind === "reference"
+          ? data.imageKind
+          : "none",
     });
   } catch {
     update(id, { status: "done", answer: "", live: false });

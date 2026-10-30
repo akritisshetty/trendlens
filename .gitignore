@@ -1,3 +1,6 @@
+# Private working notes
+my_reference.md
+
 # Legacy / large data
 train/
 train_img_filepath.txt
@@ -5,6 +8,7 @@ trendlens_outputs/
 
 # Generated pipeline data (regenerable via data_collector)
 data/raw/
+data/chat_images/
 data/processed/
 data/embeddings/
 data/metadata/

@@ -52,13 +52,14 @@ WHAT THE EVIDENCE CONTAINS
 
 HOW TO USE THE SHOT RECIPE
 The recipe is the product. Do not summarise it into vague adjectives ("use nice lighting"). Deliver the steps themselves.
-- Order them as a photographer works: light first, then framing, then colour, then arrangement, then in-process storytelling.
-- Convert each step into an imperative the reader can act on.
+- Every step belongs to an `aspect` (lighting / framing / color mood / composition / process). Group the steps under ONE heading per aspect — never repeat the aspect name on every line. Three lighting steps appear once under a "Lighting" heading, not as `Lighting:`, `Lighting:`, `Lighting:`.
+- Order the aspects as a photographer works: light first, then framing, then colour, then arrangement, then in-process storytelling.
+- Inside each aspect, convert each step into an imperative the reader can act on.
 - Keep every step. Compressing three concrete actions into one loses the value.
 
 ANSWER FORMAT
 1. One short sentence naming which theme is performing best and why, in plain language.
-2. For that theme, a numbered shot plan — one numbered line per step, in workflow order, each a single concrete action. This is the core of the answer and should be the longest part.
+2. For that theme, a numbered shot plan — grouped under one heading per aspect (e.g. "Lighting", "Framing", "Color mood", "Process"). Under each heading, list that aspect's steps as numbered or bulleted lines in the order a photographer works, each a single concrete action. This is the core of the answer and should be the longest part.
 3. A short line on what the engagement evidence shows, using the MEDIAN figure, phrased as a range or an approximate ("posts like this typically land around 7k likes").
 4. If the context contains other themes that a different aesthetic would suit, ONE line each on what makes them different and who they suit. Do not give them a full shot plan.
 5. Close with one line on how to adapt the plan.
@@ -211,14 +212,17 @@ def _trim_evidence(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def _call_gemini(
-    cfg: dict[str, Any], user_prompt: str, generation: Optional[dict] = None
+    cfg: dict[str, Any],
+    user_prompt: str,
+    generation: Optional[dict] = None,
+    system_prompt: Optional[str] = None,
 ) -> Optional[str]:
     generation = generation or {}
     url = GEMINI_URL.format(model=cfg["model"], key=cfg["api_key"])
     payload = {
         "contents": [{
             "parts": [
-                {"text": SYSTEM_PROMPT},
+                {"text": system_prompt or SYSTEM_PROMPT},
                 {"text": user_prompt},
             ]
         }],
@@ -244,7 +248,10 @@ def _call_gemini(
 
 
 def _call_openai(
-    cfg: dict[str, Any], user_prompt: str, generation: Optional[dict] = None
+    cfg: dict[str, Any],
+    user_prompt: str,
+    generation: Optional[dict] = None,
+    system_prompt: Optional[str] = None,
 ) -> Optional[str]:
     generation = generation or {}
     url = cfg["base_url"] or OPENAI_URL
@@ -252,7 +259,7 @@ def _call_openai(
     payload = {
         "model": cfg["model"],
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
         # See _call_gemini for why these are low rather than 0.7.
@@ -269,14 +276,17 @@ def _call_openai(
 
 
 def _call_ollama(
-    cfg: dict[str, Any], user_prompt: str, generation: Optional[dict] = None
+    cfg: dict[str, Any],
+    user_prompt: str,
+    generation: Optional[dict] = None,
+    system_prompt: Optional[str] = None,
 ) -> Optional[str]:
     generation = generation or {}
     url = (cfg["base_url"] or OLLAMA_URL).rstrip("/") + "/api/chat"
     payload = {
         "model": cfg["model"],
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
@@ -375,3 +385,4 @@ def format_answer_with_llm(query: str, context: dict[str, Any]) -> Optional[str]
     if not text or not text.strip():
         return None
     return text.strip()
+

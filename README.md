@@ -145,7 +145,9 @@ python -m src.api    # serves on port 8000
 ```
 
 **Endpoints:**
-- `POST /api/rag-query` — `{"query": "..."}` → answer with evidence
+- `POST /api/chat-query` — `{"query": "..."}` → Gemini-only trend answer + 3–4 relevant representative images (food and fashion photography); images are prompt-generated and selected against the answer text
+- `POST /api/rag-query` — `{"query": "..."}` → answer with evidence from the visual pipeline
+- `GET /api/chat-images?name=` — serve a cached representative chat image
 - `GET /api/health` — service status
 - `GET /api/trends` — top trends from the real Instagram `trends.json` (definition verdicts, priority, style tags)
 - `GET /api/clusters` — the same themes as cluster-shaped records
@@ -165,7 +167,14 @@ APIFY_API_TOKEN=apify_api_xxxxx
 # Optional: Instagram scan window (default: 10 days)
 TRENDLENS_INSTAGRAM_DAYS=10
 
-# Optional: LLM writing layer (plug and play — swap providers without code changes)
+# Chat interface: Gemini only (latest food/fashion-photography trends)
+TRENDLENS_GEMINI_API_KEY=...
+TRENDLENS_GEMINI_MODEL=gemini-3.1-flash-lite
+TRENDLENS_GEMINI_IMAGE_MODEL=gemini-3.1-flash-image
+TRENDLENS_GEMINI_IMAGE_COUNT=4
+TRENDLENS_GEMINI_SEARCH_GROUNDING=1
+
+# Optional: LLM writing layer for the legacy visual pipeline
 TRENDLENS_LLM_PROVIDER=gemini
 TRENDLENS_LLM_API_KEY=...
 
@@ -226,7 +235,9 @@ To add or remove accounts (or a whole new niche), edit `account.txt` with one In
 | Trend definition | Formal criteria (min posts, authors, active days, ≥0.5 growth margin, binomial significance, engagement floor, coverage) → per-cluster **Rising / InsufficientData** verdict with bounded priority; **SQLite snapshot store** (`data/trend_history.db`) refuses to count a re-run over the same post set as new history |
 | Vector index | **FAISS** `IndexFlatIP` over sentence-transformer embeddings |
 | RAG retrieval | **sentence-transformers** `BAAI/bge-base-en-v1.5` |
-| LLM writing layer | **Optional, plug and play** (Gemini/OpenAI/Ollama) — rewrites evidence into prose; swap providers via config without code changes |
+| Chat trend source | **Gemini only** (`gemini-3.1-flash-lite`) with Google Search grounding, limited to food and fashion photography |
+| Chat representative images | **Prompt-generated** editorial visuals (3–4 per answer), ranked against the answer's image prompts for relevance; the free text-to-image service is used first, with the Gemini image model as fallback. Neither source is a downloaded TrendLens post |
+| LLM writing layer (legacy pipeline) | **Optional, plug and play** (Gemini/OpenAI/Ollama) — rewrites evidence into prose; swap providers via config without code changes |
 
 ---
 
