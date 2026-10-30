@@ -1,0 +1,56 @@
+detector,metric,value,note
+Proposed,n_groups,50.0,
+Proposed,median_group_size,12.5,
+Proposed,mean_group_size,18.74,
+Proposed,max_group_size,134.0,
+Proposed,coverage_any_group,0.7502,
+Proposed,coverage_exactly_one_group,0.7502,
+Proposed,mean_groups_per_post,0.75,
+Proposed,share_posts_in_multi_groups,0.0,
+Proposed,groups_below_min_trend_size,17.0,
+Proposed,share_posts_in_small_groups,0.1313,
+Hashtag,n_groups,40.0,
+Hashtag,median_group_size,6.0,
+Hashtag,mean_group_size,7.8,
+Hashtag,max_group_size,31.0,
+Hashtag,coverage_any_group,0.1649,
+Hashtag,coverage_exactly_one_group,0.1257,
+Hashtag,mean_groups_per_post,0.25,
+Hashtag,share_posts_in_multi_groups,0.0392,
+Hashtag,groups_below_min_trend_size,33.0,
+Hashtag,share_posts_in_small_groups,0.6346,
+Keyword,n_groups,40.0,
+Keyword,median_group_size,89.5,
+Keyword,mean_group_size,112.0,
+Keyword,max_group_size,375.0,
+Keyword,coverage_any_group,0.8183,
+Keyword,coverage_exactly_one_group,0.1545,
+Keyword,mean_groups_per_post,3.587,
+Keyword,share_posts_in_multi_groups,0.6637,
+Keyword,groups_below_min_trend_size,0.0,
+Keyword,share_posts_in_small_groups,0.0,
+Keyword-distinctive,n_groups,5540.0,
+Keyword-distinctive,median_group_size,3.0,
+Keyword-distinctive,mean_group_size,6.02,
+Keyword-distinctive,max_group_size,61.0,
+Keyword-distinctive,coverage_any_group,0.9944,
+Keyword-distinctive,coverage_exactly_one_group,0.0168,
+Keyword-distinctive,mean_groups_per_post,26.717,
+Keyword-distinctive,share_posts_in_multi_groups,0.9776,
+Keyword-distinctive,groups_below_min_trend_size,4680.0,
+Keyword-distinctive,share_posts_in_small_groups,0.489,
+Proposed,visual_purity_mean,0.5895,k=50 groups
+Hashtag,visual_purity_mean,0.5835,k=40 groups
+Keyword,visual_purity_mean,0.4234,k=40 groups
+Keyword-distinctive,visual_purity_mean,0.4645,k=3475 groups
+Hashtag,visual_purity_size_matched,0.5717,sd=0.0006
+Hashtag,permutation_p_vs_proposed,0.3987,"one-sided, 20k perms"
+Keyword,visual_purity_size_matched,0.4775,sd=0.0036
+Keyword,permutation_p_vs_proposed,0.0,"one-sided, 20k perms"
+Keyword-distinctive,visual_purity_size_matched,0.4507,sd=0.0000
+Keyword-distinctive,permutation_p_vs_proposed,0.0,"one-sided, 20k perms"
+Keyword,groups_keyed_on_boilerplate,23.0,of 40 groups
+Keyword,assignments_on_boilerplate_groups,3080.0,"posts (overlapping, so > corpus size)"
+Keyword,largest_group_link,375.0,30.0% of corpus in one group
+Keyword,largest_group_bio,356.0,28.5% of corpus in one group
+Keyword,largest_group_all,235.0,18.8% of corpus in one group
