@@ -1,6 +1,5 @@
 import json
 import threading
-
 import pytest
 
 import config
